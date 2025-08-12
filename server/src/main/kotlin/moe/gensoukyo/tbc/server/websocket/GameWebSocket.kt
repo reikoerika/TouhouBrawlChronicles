@@ -1,10 +1,12 @@
 package moe.gensoukyo.tbc.server.websocket
 
-import io.ktor.server.routing.*
-import io.ktor.server.websocket.*
-import io.ktor.websocket.*
+import io.ktor.server.routing.Route
+import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.Frame
+import io.ktor.websocket.WebSocketSession
+import io.ktor.websocket.readText
+import io.ktor.websocket.send
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import moe.gensoukyo.tbc.server.service.GameService
@@ -53,6 +55,11 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 } else {
                                     send(Json.encodeToString<ServerMessage>(ServerMessage.Error("无法加入房间")))
                                 }
+                            }
+                            
+                            is ClientMessage.GetRoomList -> {
+                                val rooms = gameService.getAllRooms()
+                                send(Json.encodeToString<ServerMessage>(ServerMessage.RoomList(rooms)))
                             }
                             
                             is ClientMessage.DrawCard -> {

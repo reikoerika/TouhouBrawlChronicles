@@ -21,6 +21,9 @@ sealed class ClientMessage {
     
     @Serializable
     data class HealthChange(val playerId: String, val amount: Int) : ClientMessage()
+    
+    @Serializable
+    object GetRoomList : ClientMessage()
 }
 
 @Serializable
@@ -39,6 +42,9 @@ sealed class ServerMessage {
     
     @Serializable
     data class HealthUpdated(val playerId: String, val newHealth: Int) : ServerMessage()
+    
+    @Serializable
+    data class RoomList(val rooms: List<GameRoom>) : ServerMessage()
     
     @Serializable
     data class Error(val message: String) : ServerMessage()

@@ -60,7 +60,7 @@ dependencies {
     
     // Networking and WebSocket
     implementation("io.ktor:ktor-client-core:2.3.5")
-    implementation("io.ktor:ktor-client-android:2.3.5")
+    implementation("io.ktor:ktor-client-okhttp:2.3.5")
     implementation("io.ktor:ktor-client-websockets:2.3.5")
     implementation("io.ktor:ktor-client-content-negotiation:2.3.5")
     implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.5")

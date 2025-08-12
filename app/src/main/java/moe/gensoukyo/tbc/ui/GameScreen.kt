@@ -1,32 +1,63 @@
 package moe.gensoukyo.tbc.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.tooling.preview.Preview
 import moe.gensoukyo.tbc.shared.model.Card
 import moe.gensoukyo.tbc.shared.model.CardType
-import moe.gensoukyo.tbc.shared.model.Player
 import moe.gensoukyo.tbc.shared.model.GameRoom
 import moe.gensoukyo.tbc.shared.model.GameState
-import moe.gensoukyo.tbc.ui.theme.*
+import moe.gensoukyo.tbc.shared.model.Player
+import moe.gensoukyo.tbc.ui.theme.CardBackground
+import moe.gensoukyo.tbc.ui.theme.DamageRed
+import moe.gensoukyo.tbc.ui.theme.HealthGreen
+import moe.gensoukyo.tbc.ui.theme.TouhouBlue
+import moe.gensoukyo.tbc.ui.theme.TouhouBrawlChroniclesTheme
+import moe.gensoukyo.tbc.ui.theme.TouhouGold
+import moe.gensoukyo.tbc.ui.theme.TouhouRed
 import moe.gensoukyo.tbc.viewmodel.ConnectionState
 import moe.gensoukyo.tbc.viewmodel.GameViewModel
 
@@ -35,18 +66,24 @@ import moe.gensoukyo.tbc.viewmodel.GameViewModel
 fun GameScreen(viewModel: GameViewModel) {
     val uiState by viewModel.uiState.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
+    val storedServerUrl by viewModel.storedServerUrl.collectAsState()
+    val roomList by viewModel.roomList.collectAsState()
     
-    var playerName by remember { mutableStateOf("") }
+    var playerName by remember { mutableStateOf(viewModel.getStoredPlayerName()) }
     var roomName by remember { mutableStateOf("") }
-    var roomId by remember { mutableStateOf("") }
-    var serverUrl by remember { mutableStateOf("ws://10.0.2.2:8080/game") }
+    var roomId by remember { mutableStateOf(viewModel.getStoredRoomId()) }
+    var serverUrl by remember(storedServerUrl) { mutableStateOf(storedServerUrl) }
     var showJoinDialog by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var showServerDialog by remember { mutableStateOf(false) }
+    var showRoomList by remember { mutableStateOf(false) }
     
     LaunchedEffect(connectionState) {
         if (connectionState == ConnectionState.DISCONNECTED) {
-            viewModel.connectToServer(serverUrl)
+            viewModel.connectToServer()
+        } else if (connectionState == ConnectionState.CONNECTED) {
+            // 连接成功后自动获取房间列表
+            viewModel.getRoomList()
         }
     }
     
@@ -60,7 +97,8 @@ fun GameScreen(viewModel: GameViewModel) {
         ConnectionStatusBar(
             connectionState = connectionState,
             serverUrl = serverUrl,
-            onServerSettings = { showServerDialog = true }
+            onServerSettings = { showServerDialog = true },
+            onReconnect = { viewModel.connectToServer(serverUrl) }
         )
         
         // 错误消息
@@ -81,7 +119,8 @@ fun GameScreen(viewModel: GameViewModel) {
             // 游戏大厅界面
             GameLobby(
                 onCreateRoom = { showCreateDialog = true },
-                onJoinRoom = { showJoinDialog = true }
+                onJoinRoom = { showJoinDialog = true },
+                onShowRoomList = { showRoomList = true }
             )
         } else {
             // 游戏界面
@@ -220,13 +259,31 @@ fun GameScreen(viewModel: GameViewModel) {
             }
         )
     }
+    
+    // 房间列表对话框
+    if (showRoomList) {
+        RoomListDialog(
+            rooms = roomList,
+            playerName = playerName,
+            onJoinRoom = { room ->
+                if (playerName.isNotBlank()) {
+                    viewModel.joinRoomById(room.id, playerName)
+                    showRoomList = false
+                }
+            },
+            onRefresh = { viewModel.getRoomList() },
+            onDismiss = { showRoomList = false },
+            onPlayerNameChange = { playerName = it }
+        )
+    }
 }
 
 @Composable
 fun ConnectionStatusBar(
     connectionState: ConnectionState,
     serverUrl: String,
-    onServerSettings: () -> Unit
+    onServerSettings: () -> Unit,
+    onReconnect: () -> Unit = {}
 ) {
     val (text, color) = when (connectionState) {
         ConnectionState.DISCONNECTED -> "未连接" to Color.Gray
@@ -267,6 +324,17 @@ fun ConnectionStatusBar(
                     tint = color
                 )
             }
+            
+            // 添加重连按钮（仅在错误状态显示）
+            if (connectionState == ConnectionState.ERROR) {
+                IconButton(onClick = { onReconnect() }) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "重新连接",
+                        tint = DamageRed
+                    )
+                }
+            }
         }
     }
 }
@@ -274,7 +342,8 @@ fun ConnectionStatusBar(
 @Composable
 fun GameLobby(
     onCreateRoom: () -> Unit,
-    onJoinRoom: () -> Unit
+    onJoinRoom: () -> Unit,
+    onShowRoomList: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -303,11 +372,23 @@ fun GameLobby(
         Spacer(modifier = Modifier.height(16.dp))
         
         Button(
-            onClick = onJoinRoom,
+            onClick = onShowRoomList,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
             colors = ButtonDefaults.buttonColors(containerColor = TouhouBlue)
+        ) {
+            Text("房间列表", fontSize = 18.sp)
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Button(
+            onClick = onJoinRoom,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = TouhouGold)
         ) {
             Text("加入房间", fontSize = 18.sp)
         }
@@ -580,11 +661,20 @@ fun GameCard(
 @Composable
 fun ConnectionStatusBarPreview() {
     TouhouBrawlChroniclesTheme {
-        ConnectionStatusBar(
-            connectionState = ConnectionState.CONNECTED,
-            serverUrl = "ws://10.0.2.2:8080/game",
-            onServerSettings = {}
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ConnectionStatusBar(
+                connectionState = ConnectionState.CONNECTED,
+                serverUrl = "ws://10.0.2.2:8080/game",
+                onServerSettings = {},
+                onReconnect = {}
+            )
+            ConnectionStatusBar(
+                connectionState = ConnectionState.ERROR,
+                serverUrl = "ws://192.168.1.100:8080/game",
+                onServerSettings = {},
+                onReconnect = {}
+            )
+        }
     }
 }
 
@@ -594,7 +684,8 @@ fun GameLobbyPreview() {
     TouhouBrawlChroniclesTheme {
         GameLobby(
             onCreateRoom = {},
-            onJoinRoom = {}
+            onJoinRoom = {},
+            onShowRoomList = {}
         )
     }
 }
@@ -756,5 +847,162 @@ fun ServerSettingsDialogPreview() {
                 }
             }
         )
+    }
+}
+
+@Composable
+fun RoomListDialog(
+    rooms: List<moe.gensoukyo.tbc.shared.model.GameRoom>,
+    playerName: String,
+    onJoinRoom: (moe.gensoukyo.tbc.shared.model.GameRoom) -> Unit,
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit,
+    onPlayerNameChange: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("房间列表 (${rooms.size})")
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "刷新",
+                        tint = TouhouBlue
+                    )
+                }
+            }
+        },
+        text = {
+            Column {
+                // 玩家名输入
+                OutlinedTextField(
+                    value = playerName,
+                    onValueChange = onPlayerNameChange,
+                    label = { Text("玩家名称") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    singleLine = true
+                )
+                
+                if (rooms.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "暂无房间",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.Gray
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.height(300.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(rooms) { room ->
+                            RoomListItem(
+                                room = room,
+                                onJoinRoom = { onJoinRoom(room) },
+                                canJoin = playerName.isNotBlank() && room.players.size < room.maxPlayers
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        }
+    )
+}
+
+@Composable
+fun RoomListItem(
+    room: moe.gensoukyo.tbc.shared.model.GameRoom,
+    onJoinRoom: () -> Unit,
+    canJoin: Boolean
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when (room.gameState) {
+                moe.gensoukyo.tbc.shared.model.GameState.WAITING -> CardBackground
+                moe.gensoukyo.tbc.shared.model.GameState.PLAYING -> TouhouGold.copy(alpha = 0.1f)
+                moe.gensoukyo.tbc.shared.model.GameState.FINISHED -> Color.Gray.copy(alpha = 0.1f)
+            }
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = room.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        text = "玩家: ${room.players.size}/${room.maxPlayers}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                    
+                    Text(
+                        text = when (room.gameState) {
+                            moe.gensoukyo.tbc.shared.model.GameState.WAITING -> "等待中"
+                            moe.gensoukyo.tbc.shared.model.GameState.PLAYING -> "游戏中"
+                            moe.gensoukyo.tbc.shared.model.GameState.FINISHED -> "已结束"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when (room.gameState) {
+                            moe.gensoukyo.tbc.shared.model.GameState.WAITING -> HealthGreen
+                            moe.gensoukyo.tbc.shared.model.GameState.PLAYING -> TouhouGold
+                            moe.gensoukyo.tbc.shared.model.GameState.FINISHED -> Color.Gray
+                        },
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+            
+            if (canJoin && room.gameState == moe.gensoukyo.tbc.shared.model.GameState.WAITING) {
+                Button(
+                    onClick = onJoinRoom,
+                    colors = ButtonDefaults.buttonColors(containerColor = TouhouBlue),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text("加入", fontSize = 14.sp)
+                }
+            } else {
+                Text(
+                    text = when {
+                        room.players.size >= room.maxPlayers -> "已满"
+                        room.gameState != moe.gensoukyo.tbc.shared.model.GameState.WAITING -> "进行中"
+                        else -> "不可用"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            }
+        }
     }
 }

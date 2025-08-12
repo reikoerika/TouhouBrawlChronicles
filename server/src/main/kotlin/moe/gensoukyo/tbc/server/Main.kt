@@ -11,6 +11,7 @@ import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.pingPeriod
 import io.ktor.server.websocket.timeout
 import kotlinx.serialization.json.Json
+import moe.gensoukyo.tbc.server.routes.healthRoutes
 import moe.gensoukyo.tbc.server.service.GameService
 import moe.gensoukyo.tbc.server.websocket.gameWebSocket
 import java.time.Duration
@@ -40,5 +41,6 @@ fun Application.module() {
     
     routing {
         gameWebSocket(gameService)
+        healthRoutes()
     }
 }

@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
     application
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 application {
@@ -26,4 +27,26 @@ dependencies {
 
 kotlin {
     jvmToolchain(11)
+}
+
+tasks {
+    shadowJar {
+        archiveBaseName.set("touhou-brawl-chronicles-server")
+        archiveVersion.set("1.0.0")
+        archiveClassifier.set("")
+        
+        // 设置主类
+        manifest {
+            attributes["Main-Class"] = "moe.gensoukyo.tbc.server.MainKt"
+        }
+        
+        // 合并重复的服务文件
+        mergeServiceFiles()
+    }
+
+    // 让build任务依赖shadowJar
+    build {
+        dependsOn(shadowJar)
+    }
+
 }
