@@ -258,18 +258,16 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 val roomId = findPlayerRoom(gameService, playerId)
                                 
                                 if (roomId != null) {
-                                    val success = gameService.selectAbundantHarvestCard(roomId, playerId, message.selectedCardId)
-                                    if (success) {
+                                    val selectedCard = gameService.selectAbundantHarvestCard(roomId, playerId, message.selectedCardId)
+                                    if (selectedCard != null) {
                                         val room = gameService.getRoom(roomId)!!
                                         val pendingResponse = room.pendingResponse
-                                        
                                         // 广播选择结果
-                                        val selectedCard = room.players.find { it.id == playerId }?.cards?.find { it.id == message.selectedCardId }
                                         broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
                                             ServerMessage.AbundantHarvestCardSelected(
                                                 playerId = playerId,
                                                 playerName = room.players.find { it.id == playerId }?.name ?: "未知",
-                                                selectedCard = selectedCard ?: Card("", "", CardType.BASIC, ""),
+                                                selectedCard = selectedCard,
                                                 remainingCards = pendingResponse?.availableCards ?: emptyList(),
                                                 room = room
                                             )
@@ -277,16 +275,9 @@ fun Route.gameWebSocket(gameService: GameService) {
                                         
                                         if (pendingResponse == null) {
                                             // 五谷丰登完成
-                                            val selections = mutableMapOf<String, Card>()
-                                            room.players.forEach { player ->
-                                                player.cards.lastOrNull()?.let { card ->
-                                                    selections[player.id] = card
-                                                }
-                                            }
-                                            
                                             broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
                                                 ServerMessage.AbundantHarvestCompleted(
-                                                    selections = selections,
+                                                    selections = room.lastAbundantHarvestSelections,
                                                     room = room
                                                 )
                                             }

@@ -397,9 +397,8 @@ class GameService {
         return when (card.name) {
             "杀" -> targets // 杀需要目标响应闪
             "决斗" -> targets // 决斗是基本牌，需要目标响应杀或闪
-            "五谷丰登" -> emptyList() // 五谷丰登需要特殊处理，不走常规响应流程
             else -> when (card.type) {
-                CardType.TRICK -> targets // 锦囊牌可能需要无懈可击
+                CardType.TRICK -> targets // 锦囊牌（包括五谷丰登）可能需要无懈可击
                 else -> emptyList()
             }
         }
@@ -424,12 +423,7 @@ class GameService {
         targets: List<Player>, 
         targetIds: List<String>
     ): Pair<PlayedCard?, PendingResponse?> {
-        // 特殊处理五谷丰登
-        if (card.name == "五谷丰登") {
-            return handleAbundantHarvest(room, player, cardIndex, card)
-        }
-        
-        // 处理其他卡牌效果
+        // 处理卡牌效果
         val effectResult = when (card.type) {
             CardType.BASIC -> cardEffectService.handleBasicCard(card, player, targets, room)
             CardType.TRICK -> cardEffectService.handleTrickCard(card, player, targets, room)
@@ -439,6 +433,7 @@ class GameService {
         if (!effectResult.success) {
             return Pair(null, null)
         }
+        
         
         // 从手牌中移除
         player.cards.removeAt(cardIndex)
@@ -647,23 +642,23 @@ class GameService {
         }
     }
     
-    fun selectAbundantHarvestCard(roomId: String, playerId: String, selectedCardId: String): Boolean {
-        val room = rooms[roomId] ?: return false
-        val pendingResponse = room.pendingResponse ?: return false
-        val player = room.players.find { it.id == playerId } ?: return false
+    fun selectAbundantHarvestCard(roomId: String, playerId: String, selectedCardId: String): Card? {
+        val room = rooms[roomId] ?: return null
+        val pendingResponse = room.pendingResponse ?: return null
+        val player = room.players.find { it.id == playerId } ?: return null
         
         // 验证是否是五谷丰登且是当前选择玩家
-        if (!pendingResponse.isAbundantHarvest) return false
+        if (!pendingResponse.isAbundantHarvest) return null
         
         val alivePlayers = room.players.filter { it.health > 0 }
-        if (pendingResponse.currentSelectionPlayerIndex >= alivePlayers.size) return false
+        if (pendingResponse.currentSelectionPlayerIndex >= alivePlayers.size) return null
         
         val currentPlayer = alivePlayers[pendingResponse.currentSelectionPlayerIndex]
-        if (currentPlayer.id != playerId) return false
+        if (currentPlayer.id != playerId) return null
         
         // 验证选择的卡牌是否在可用列表中
         val selectedCardIndex = pendingResponse.availableCards.indexOfFirst { it.id == selectedCardId }
-        if (selectedCardIndex == -1) return false
+        if (selectedCardIndex == -1) return null
         
         val selectedCard = pendingResponse.availableCards.removeAt(selectedCardIndex)
         
@@ -681,13 +676,54 @@ class GameService {
             // 五谷丰登完成，将剩余卡牌（如果有）放入弃牌堆
             room.discardPile.addAll(pendingResponse.availableCards)
             room.discardPile.add(pendingResponse.originalCard) // 五谷丰登本身也进入弃牌堆
+            
+            // 保存选择记录到房间状态中供WebSocket使用
+            room.lastAbundantHarvestSelections = pendingResponse.selectedCards.mapValues { (playerId, cardId) ->
+                // 从玩家手牌中找到对应卡牌
+                room.players.find { it.id == playerId }?.cards?.find { it.id == cardId }
+                    ?: Card("unknown", "未知卡牌", CardType.BASIC, "")
+            }
+            
             room.pendingResponse = null
         } else {
             // 更新到下一个玩家
             pendingResponse.targetPlayerId = alivePlayers[pendingResponse.currentSelectionPlayerIndex].id
         }
         
-        return true
+        return selectedCard
+    }
+    
+    private fun startAbundantHarvestSelection(room: GameRoom, originalPlayer: Player) {
+        val originalCard = Card("五谷丰登", "所有玩家依次选择获得一张牌", CardType.TRICK, "五谷丰登")
+        
+        // 从牌堆顶抽取等同于存活玩家数量的牌
+        val alivePlayers = room.players.filter { it.health > 0 }
+        val availableCards = mutableListOf<Card>()
+        
+        repeat(alivePlayers.size) {
+            if (room.deck.isEmpty() && room.discardPile.isNotEmpty()) {
+                // 重新洗牌
+                room.deck.addAll(room.discardPile.shuffled())
+                room.discardPile.clear()
+            }
+            
+            if (room.deck.isNotEmpty()) {
+                availableCards.add(room.deck.removeAt(0))
+            }
+        }
+        
+        // 创建五谷丰登的PendingResponse
+        val pendingResponse = PendingResponse(
+            targetPlayerId = alivePlayers.first().id,
+            originalCard = originalCard,
+            originalPlayerId = originalPlayer.id,
+            responseType = ResponseType.ABUNDANT_HARVEST,
+            isAbundantHarvest = true,
+            availableCards = availableCards,
+            currentSelectionPlayerIndex = 0
+        )
+        
+        room.pendingResponse = pendingResponse
     }
     
     private fun resolveCardEffect(room: GameRoom, pendingResponse: PendingResponse, response: CardResponse): CardResolutionResult {
@@ -711,6 +747,17 @@ class GameService {
                         CardType.BASIC -> cardEffectService.handleBasicCard(originalCard, originalPlayer, targets, room)
                         CardType.TRICK -> cardEffectService.handleTrickCard(originalCard, originalPlayer, targets, room)
                         CardType.EQUIPMENT -> cardEffectService.handleEquipmentCard(originalCard, originalPlayer, room)
+                    }
+                    
+                    // 检查是否是五谷丰登且需要特殊处理
+                    if (effectResult.requiresSpecialHandling && originalCard.name == "五谷丰登") {
+                        // 启动五谷丰登选牌流程
+                        startAbundantHarvestSelection(room, originalPlayer)
+                        return CardResolutionResult(
+                            success = true,
+                            blocked = false,
+                            message = "${originalCard.name}开始，玩家依次选择卡牌"
+                        )
                     }
                     
                     CardResolutionResult(

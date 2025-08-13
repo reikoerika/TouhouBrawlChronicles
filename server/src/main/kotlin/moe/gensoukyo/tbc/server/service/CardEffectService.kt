@@ -156,10 +156,6 @@ class CardEffectService {
         return CardEffectResult(false, "${target.name} 没有手牌可弃置")
     }
     
-    private fun handleAbundantHarvest(card: Card, caster: Player, targets: List<Player>, room: GameRoom): CardEffectResult {
-        // 所有玩家各摸一张牌
-        return CardEffectResult(true, "${caster.name} 使用五谷丰登，所有玩家各摸一张牌", drawCards = 1, affectAllPlayers = true)
-    }
     
     private fun handlePeachGarden(card: Card, caster: Player, targets: List<Player>, room: GameRoom): CardEffectResult {
         // 所有玩家回复1点体力
@@ -211,6 +207,16 @@ class CardEffectService {
         
         return CardEffectResult(true, "${caster.name} 使用万箭齐发")
     }
+    
+    private fun handleAbundantHarvest(card: Card, caster: Player, targets: List<Player>, room: GameRoom): CardEffectResult {
+        // 五谷丰登：从牌堆顶抽取等于存活玩家数量的牌，所有玩家依次选择一张
+        // 这里只返回成功标志，具体的选牌逻辑将由GameService处理
+        return CardEffectResult(
+            success = true, 
+            message = "${caster.name} 使用五谷丰登", 
+            requiresSpecialHandling = true
+        )
+    }
 }
 
 /**
@@ -220,5 +226,6 @@ data class CardEffectResult(
     val success: Boolean,
     val message: String,
     val drawCards: Int = 0,  // 需要摸牌数量
-    val affectAllPlayers: Boolean = false  // 是否影响所有玩家
+    val affectAllPlayers: Boolean = false,  // 是否影响所有玩家
+    val requiresSpecialHandling: Boolean = false  // 是否需要特殊处理（如五谷丰登）
 )
