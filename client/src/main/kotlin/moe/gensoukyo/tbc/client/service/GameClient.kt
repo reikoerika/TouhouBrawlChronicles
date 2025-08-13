@@ -411,7 +411,7 @@ class GameClient {
             }
         }
         
-        val message = ClientMessage.UseCard(player.id, card.id, targetId)
+        val message = ClientMessage.PlayCard(player.id, card.id, listOfNotNull(targetId))
         session?.send(Json.encodeToString<ClientMessage>(message))
     }
     
@@ -470,7 +470,7 @@ class GameClient {
         }
         
         val responseCardId = if (choice > 0) player.cards[choice - 1].id else null
-        val message = ClientMessage.RespondToCardNew(player.id, responseCardId, choice > 0)
+        val message = ClientMessage.RespondToCard(player.id, responseCardId, choice > 0)
         session?.send(Json.encodeToString<ClientMessage>(message))
     }
     
@@ -518,7 +518,7 @@ class GameClient {
             }
         }
         
-        val message = ClientMessage.PlayCardNew(player.id, card.id, targetIds)
+        val message = ClientMessage.PlayCard(player.id, card.id, targetIds)
         session?.send(Json.encodeToString<ClientMessage>(message))
     }
     
@@ -561,7 +561,7 @@ class GameClient {
         val responseCardId = if (wuxieKeji != null && choice == 1) wuxieKeji.id else null
         val accept = responseCardId != null
         
-        val message = ClientMessage.RespondToCardNew(player.id, responseCardId, accept)
+        val message = ClientMessage.RespondToCard(player.id, responseCardId, accept)
         session?.send(Json.encodeToString<ClientMessage>(message))
     }
     
@@ -574,13 +574,13 @@ class GameClient {
         if (choice == null || choice < 1 || choice > options.size) {
             println("无效选择，默认选择第一个选项")
             val selectedOption = options.first()
-            val message = ClientMessage.RespondToCardNew(currentPlayer?.id ?: "", selectedOption.id, true)
+            val message = ClientMessage.RespondToCard(currentPlayer?.id ?: "", selectedOption.id, true)
             session?.send(Json.encodeToString<ClientMessage>(message))
             return
         }
         
         val selectedOption = options[choice - 1]
-        val message = ClientMessage.RespondToCardNew(currentPlayer?.id ?: "", selectedOption.id, true)
+        val message = ClientMessage.RespondToCard(currentPlayer?.id ?: "", selectedOption.id, true)
         session?.send(Json.encodeToString<ClientMessage>(message))
     }
 }

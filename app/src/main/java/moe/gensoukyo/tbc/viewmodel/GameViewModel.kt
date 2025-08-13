@@ -133,12 +133,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
-    fun useCard(cardId: String, targetId: String? = null) {
-        _uiState.value.currentPlayer?.let { player ->
-            sendMessage(ClientMessage.UseCard(player.id, cardId, targetId))
-        }
-    }
-    
     fun getStoredPlayerName(): String = preferencesManager.getPlayerName()
     fun getStoredRoomId(): String = preferencesManager.getLastRoomId()
     
@@ -164,7 +158,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     
     fun playCard(cardId: String, targetIds: List<String> = emptyList()) {
         _uiState.value.currentPlayer?.let { player ->
-            sendMessage(ClientMessage.PlayCardNew(player.id, cardId, targetIds))
+            sendMessage(ClientMessage.PlayCard(player.id, cardId, targetIds))
         }
     }
     
@@ -187,7 +181,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             // 发送响应消息到服务器
-            sendMessage(ClientMessage.RespondToCardNew(player.id, responseCardId, accept))
+            sendMessage(ClientMessage.RespondToCard(player.id, responseCardId, accept))
         }
     }
     

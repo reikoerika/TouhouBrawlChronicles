@@ -22,12 +22,6 @@ sealed class ClientMessage {
     data class DrawCard(val playerId: String) : ClientMessage()
     
     @Serializable
-    data class UseCard(val playerId: String, val cardId: String, val targetId: String? = null) : ClientMessage()
-    
-    @Serializable
-    data class HealthChange(val playerId: String, val amount: Int) : ClientMessage()
-    
-    @Serializable
     object GetRoomList : ClientMessage()
     
     @Serializable
@@ -39,21 +33,19 @@ sealed class ClientMessage {
     @Serializable
     data class AdjustPlayerOrder(val roomId: String, val newOrder: List<String>) : ClientMessage()
     
+    // 统一的出牌消息 - 支持多目标
     @Serializable
     data class PlayCard(val playerId: String, val cardId: String, val targetIds: List<String> = emptyList()) : ClientMessage()
     
+    // 统一的响应消息  
     @Serializable
-    data class RespondToCard(val playerId: String, val responseCardId: String?, val accept: Boolean = false) : ClientMessage()
+    data class RespondToCard(val playerId: String, val responseCardId: String? = null, val accept: Boolean = false) : ClientMessage()
     
     @Serializable
     data class SelectAbundantHarvestCard(val playerId: String, val selectedCardId: String) : ClientMessage()
     
-    // 新的卡牌执行系统消息
     @Serializable
-    data class PlayCardNew(val playerId: String, val cardId: String, val targetIds: List<String> = emptyList()) : ClientMessage()
-    
-    @Serializable  
-    data class RespondToCardNew(val playerId: String, val responseCardId: String? = null, val accept: Boolean = false) : ClientMessage()
+    data class HealthChange(val playerId: String, val amount: Int) : ClientMessage()
 }
 
 @Serializable

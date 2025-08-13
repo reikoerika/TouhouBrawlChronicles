@@ -195,7 +195,7 @@ class ImprovedGameViewModel(application: Application) : AndroidViewModel(applica
             return
         }
         
-        sendMessage(ClientMessage.PlayCardNew(currentPlayer.id, cardId, targetIds))
+        sendMessage(ClientMessage.PlayCard(currentPlayer.id, cardId, targetIds))
     }
     
     /**
@@ -208,7 +208,7 @@ class ImprovedGameViewModel(application: Application) : AndroidViewModel(applica
             return
         }
         
-        sendMessage(ClientMessage.RespondToCardNew(currentPlayer.id, responseCardId, accept))
+        sendMessage(ClientMessage.RespondToCard(currentPlayer.id, responseCardId, accept))
     }
     
     /**

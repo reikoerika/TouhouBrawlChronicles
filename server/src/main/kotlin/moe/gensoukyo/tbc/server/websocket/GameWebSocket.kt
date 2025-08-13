@@ -101,20 +101,55 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 }
                             }
                             
-                            is ClientMessage.UseCard -> {
-                                val playerId = message.playerId
-                                val roomId = findPlayerRoom(gameService, playerId)
+                            // === 统一的出牌处理 ===
+                            is ClientMessage.PlayCard -> {
+                                // 使用新的CardExecutionHandler处理所有出牌逻辑
+                                val cardExecutionHandler = CardExecutionHandler(
+                                    gameService = gameService,
+                                    playerSessions = playerSessions,
+                                    spectatorSessions = spectatorSessions
+                                )
+                                cardExecutionHandler.syncConnections(connections)
                                 
-                                if (roomId != null) {
-                                    val success = gameService.useCard(roomId, playerId, message.cardId, message.targetId)
-                                    if (success) {
-                                        val room = gameService.getRoom(roomId)!!
-                                        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                            GameStateUpdate(room)
-                                        }
-                                    }
+                                val result = cardExecutionHandler.handlePlayCard(
+                                    PlayCardMessage.fromClientMessage(message),
+                                    connections
+                                )
+                                
+                                if (result.isFailure) {
+                                    val playerId = message.playerId
+                                    val sessionId = playerSessions[playerId]
+                                    val session = connections[sessionId]
+                                    session?.send(Json.encodeToString<ServerMessage>(
+                                        Error("卡牌执行失败: ${result.exceptionOrNull()?.message}")
+                                    ))
                                 }
                             }
+                            
+                            // === 统一的响应处理 ===
+                            is ClientMessage.RespondToCard -> {
+                                val cardExecutionHandler = CardExecutionHandler(
+                                    gameService = gameService,
+                                    playerSessions = playerSessions,
+                                    spectatorSessions = spectatorSessions
+                                )
+                                cardExecutionHandler.syncConnections(connections)
+                                
+                                val result = cardExecutionHandler.handleResponse(
+                                    RespondToCardMessage.fromClientMessage(message),
+                                    connections
+                                )
+                                
+                                if (result.isFailure) {
+                                    val playerId = message.playerId
+                                    val sessionId = playerSessions[playerId]
+                                    val session = connections[sessionId]
+                                    session?.send(Json.encodeToString<ServerMessage>(
+                                        Error("响应失败: ${result.exceptionOrNull()?.message}")
+                                    ))
+                                }
+                            }
+                            
                             
                             is ClientMessage.StartGame -> {
                                 val result = gameService.startGame(message.roomId)
@@ -346,49 +381,6 @@ fun Route.gameWebSocket(gameService: GameService) {
                                             }
                                         }
                                     }
-                                }
-                            }
-
-                            is ClientMessage.PlayCardNew -> {
-                                val cardExecutionHandler = CardExecutionHandler(
-                                    gameService = gameService,
-                                    playerSessions = playerSessions,
-                                    spectatorSessions = spectatorSessions
-                                )
-                                cardExecutionHandler.syncConnections(connections)
-                                val result = cardExecutionHandler.handlePlayCard(
-                                    PlayCardMessage(message.playerId, message.cardId, message.targetIds),
-                                    connections
-                                )
-                                
-                                if (result.isFailure) {
-                                    val playerId = message.playerId
-                                    val sessionId = playerSessions[playerId]
-                                    val session = connections[sessionId]
-                                    session?.send(Json.encodeToString<ServerMessage>(
-                                        ServerMessage.Error("卡牌执行失败: ${result.exceptionOrNull()?.message}")
-                                    ))
-                                }
-                            }
-                            is ClientMessage.RespondToCardNew -> {
-                                val cardExecutionHandler = CardExecutionHandler(
-                                    gameService = gameService,
-                                    playerSessions = playerSessions,
-                                    spectatorSessions = spectatorSessions
-                                )
-                                cardExecutionHandler.syncConnections(connections)
-                                val result = cardExecutionHandler.handleResponse(
-                                    RespondToCardMessage(message.playerId, message.responseCardId, message.accept),
-                                    connections
-                                )
-                                
-                                if (result.isFailure) {
-                                    val playerId = message.playerId
-                                    val sessionId = playerSessions[playerId]
-                                    val session = connections[sessionId]
-                                    session?.send(Json.encodeToString<ServerMessage>(
-                                        ServerMessage.Error("响应处理失败: ${result.exceptionOrNull()?.message}")
-                                    ))
                                 }
                             }
                         }
