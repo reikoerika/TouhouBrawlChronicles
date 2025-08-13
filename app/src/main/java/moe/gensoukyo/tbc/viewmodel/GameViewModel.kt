@@ -19,7 +19,9 @@ import moe.gensoukyo.tbc.data.PreferencesManager
 import moe.gensoukyo.tbc.shared.messages.ClientMessage
 import moe.gensoukyo.tbc.shared.messages.ServerMessage
 import moe.gensoukyo.tbc.shared.model.GameRoom
+import moe.gensoukyo.tbc.shared.model.Identity
 import moe.gensoukyo.tbc.shared.model.Player
+import moe.gensoukyo.tbc.shared.model.ResponseType
 import moe.gensoukyo.tbc.shared.model.Spectator
 
 class GameViewModel(application: Application) : AndroidViewModel(application) {
@@ -309,7 +311,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                         cards = message.cards.toMutableList()
                     )
                     val cardCountMessage = when (updatedPlayer.identity) {
-                        moe.gensoukyo.tbc.shared.model.Identity.LORD -> "主公获得初始手牌 ${message.cards.size} 张！"
+                        Identity.LORD -> "主公获得初始手牌 ${message.cards.size} 张！"
                         else -> "获得初始手牌 ${message.cards.size} 张！"
                     }
                     _uiState.value = currentState.copy(
@@ -353,14 +355,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 if (currentState.currentPlayer?.id == message.targetPlayerId) {
                     // 当前玩家需要响应
                     val responseMessage = when (message.responseType) {
-                        moe.gensoukyo.tbc.shared.model.ResponseType.DODGE -> "需要出闪响应${message.originalPlayer}的${message.originalCard.name}"
-                        moe.gensoukyo.tbc.shared.model.ResponseType.NULLIFICATION -> "是否使用无懈可击响应${message.originalCard.name}"
-                        moe.gensoukyo.tbc.shared.model.ResponseType.DUEL_KILL -> {
+                        ResponseType.DODGE -> "需要出闪响应${message.originalPlayer}的${message.originalCard.name}"
+                        ResponseType.NULLIFICATION -> "是否使用无懈可击响应${message.originalCard.name}"
+                        ResponseType.DUEL_KILL -> {
                             val killCount = currentState.gameRoom?.pendingResponse?.duelKillCount ?: 0
                             "决斗第${killCount + 1}回合：需要出杀响应${message.originalPlayer}"
                         }
-                        moe.gensoukyo.tbc.shared.model.ResponseType.ABUNDANT_HARVEST -> "请选择一张卡牌"
-                        moe.gensoukyo.tbc.shared.model.ResponseType.OPTIONAL -> "是否响应${message.originalCard.name}"
+                        ResponseType.ABUNDANT_HARVEST -> "请选择一张卡牌"
+                        ResponseType.OPTIONAL -> "是否响应${message.originalCard.name}"
                     }
                     
                     _uiState.value = currentState.copy(
@@ -448,7 +450,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                         gameRoom = message.room,
                         abundantHarvestAvailableCards = message.availableCards,
                         needsResponse = true,
-                        responseType = moe.gensoukyo.tbc.shared.model.ResponseType.ABUNDANT_HARVEST,
+                        responseType = ResponseType.ABUNDANT_HARVEST,
                         errorMessage = "轮到你选择卡牌了！"
                     )
                 } else {
@@ -505,6 +507,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             is ServerMessage.Error -> {
                 _uiState.value = _uiState.value.copy(errorMessage = message.message)
             }
+
+            is ServerMessage.CardExecutionCompleted -> TODO()
+            is ServerMessage.CardExecutionStarted -> TODO()
+            is ServerMessage.ResponseReceived -> TODO()
+            is ServerMessage.ResponseRequired -> TODO()
+            is ServerMessage.SpecialExecutionStarted -> TODO()
         }
     }
     
