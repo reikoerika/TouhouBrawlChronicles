@@ -37,7 +37,7 @@ sealed class ClientMessage {
     data class AdjustPlayerOrder(val roomId: String, val newOrder: List<String>) : ClientMessage()
     
     @Serializable
-    data class PlayCard(val playerId: String, val cardId: String, val targetId: String? = null) : ClientMessage()
+    data class PlayCard(val playerId: String, val cardId: String, val targetIds: List<String> = emptyList()) : ClientMessage()
 }
 
 @Serializable
@@ -56,6 +56,9 @@ sealed class ServerMessage {
     
     @Serializable
     data class CardDrawn(val playerId: String, val card: Card) : ServerMessage()
+    
+    @Serializable
+    data class CardsDrawn(val playerId: String, val cards: List<Card>) : ServerMessage()
     
     @Serializable
     data class HealthUpdated(val playerId: String, val newHealth: Int) : ServerMessage()

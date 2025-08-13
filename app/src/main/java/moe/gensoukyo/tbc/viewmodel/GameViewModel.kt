@@ -160,9 +160,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         sendMessage(ClientMessage.AdjustPlayerOrder(roomId, newOrder))
     }
     
-    fun playCard(cardId: String, targetId: String? = null) {
+    fun playCard(cardId: String, targetIds: List<String> = emptyList()) {
         _uiState.value.currentPlayer?.let { player ->
-            sendMessage(ClientMessage.PlayCard(player.id, cardId, targetId))
+            sendMessage(ClientMessage.PlayCard(player.id, cardId, targetIds))
         }
     }
     
@@ -226,6 +226,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             
+            is ServerMessage.CardsDrawn -> {
+                val currentState = _uiState.value
+                val updatedPlayer = currentState.currentPlayer?.copy(
+                    cards = currentState.currentPlayer.cards.toMutableList().apply { 
+                        addAll(message.cards)
+                    }
+                )
+                
+                if (updatedPlayer != null) {
+                    _uiState.value = currentState.copy(
+                        currentPlayer = updatedPlayer,
+                        errorMessage = "${updatedPlayer.name} 摸了${message.cards.size}张牌"
+                    )
+                }
+            }
+            
             is ServerMessage.HealthUpdated -> {
                 val currentState = _uiState.value
                 val updatedRoom = currentState.gameRoom?.let { room ->
@@ -268,8 +284,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             is ServerMessage.CardPlayed -> {
-                _uiState.value = _uiState.value.copy(
-                    gameRoom = message.room,
+                val currentState = _uiState.value
+                val updatedRoom = message.room
+                
+                // 更新当前玩家信息（如果是当前玩家出的牌）
+                val updatedCurrentPlayer = if (currentState.currentPlayer?.id == message.playedCard.playerId) {
+                    updatedRoom.players.find { it.id == currentState.currentPlayer.id }
+                } else {
+                    currentState.currentPlayer
+                }
+                
+                _uiState.value = currentState.copy(
+                    gameRoom = updatedRoom,
+                    currentPlayer = updatedCurrentPlayer,
                     errorMessage = "${message.playedCard.playerName} 出了 ${message.playedCard.card.name}"
                 )
             }

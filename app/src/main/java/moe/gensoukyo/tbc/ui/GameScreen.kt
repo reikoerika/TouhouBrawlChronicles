@@ -50,6 +50,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import moe.gensoukyo.tbc.shared.model.Card
+import moe.gensoukyo.tbc.shared.model.CardSubType
 import moe.gensoukyo.tbc.shared.model.CardType
 import moe.gensoukyo.tbc.shared.model.GameRoom
 import moe.gensoukyo.tbc.shared.model.GameState
@@ -144,7 +145,7 @@ fun GameScreen(viewModel: GameViewModel) {
                     onDrawCard = { viewModel.drawCard() },
                     onAddHealth = { viewModel.addHealth(10) },
                     onReduceHealth = { viewModel.reduceHealth(10) },
-                    onPlayCard = { cardId, targetId -> viewModel.playCard(cardId, targetId) },
+                    onPlayCard = { cardId, targetIds -> viewModel.playCard(cardId, targetIds) },
                     onStartGame = { viewModel.startGame(uiState.gameRoom!!.id) },
                     onEndTurn = { playerId -> viewModel.endTurn(playerId) },
                     onAdjustOrder = { newOrder -> viewModel.adjustPlayerOrder(uiState.gameRoom!!.id, newOrder) }
@@ -421,7 +422,7 @@ fun GameRoomScreen(
     onDrawCard: () -> Unit,
     onAddHealth: () -> Unit,
     onReduceHealth: () -> Unit,
-    onPlayCard: (String, String?) -> Unit,
+    onPlayCard: (String, List<String>) -> Unit,
     onStartGame: () -> Unit,
     onEndTurn: (String) -> Unit,
     onAdjustOrder: (List<String>) -> Unit
@@ -711,13 +712,120 @@ fun SpectatorCard(spectator: moe.gensoukyo.tbc.shared.model.Spectator) {
 }
 
 @Composable
+fun EquipmentCard(
+    card: Card?,
+    equipmentType: String
+) {
+    Card(
+        modifier = Modifier
+            .width(80.dp)
+            .height(100.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (card != null) {
+                when (card.subType) {
+                    CardSubType.WEAPON -> DamageRed.copy(alpha = 0.6f)
+                    CardSubType.ARMOR -> TouhouBlue.copy(alpha = 0.6f)
+                    CardSubType.HORSE -> HealthGreen.copy(alpha = 0.6f)
+                    else -> TouhouGold.copy(alpha = 0.6f)
+                }
+            } else {
+                Color.Gray.copy(alpha = 0.3f)
+            }
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            if (card != null) {
+                Text(
+                    text = card.name,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                
+                // 显示装备效果
+                if (card.range != 1) {
+                    Text(
+                        text = if (card.range > 0) "+${card.range}" else "${card.range}",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                Text(
+                    text = equipmentType,
+                    color = Color.Gray,
+                    fontSize = 8.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun EquipmentArea(
+    player: Player
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "装备区",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // 武器
+                EquipmentCard(
+                    card = player.equipment.weapon,
+                    equipmentType = "武器"
+                )
+                
+                // 防具
+                EquipmentCard(
+                    card = player.equipment.armor,
+                    equipmentType = "防具"
+                )
+                
+                // 攻击马
+                EquipmentCard(
+                    card = player.equipment.offensiveHorse,
+                    equipmentType = "攻击马"
+                )
+                
+                // 防御马
+                EquipmentCard(
+                    card = player.equipment.defensiveHorse,
+                    equipmentType = "防御马"
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun CurrentPlayerActions(
     player: Player,
     gameRoom: GameRoom,
     onDrawCard: () -> Unit,
     onAddHealth: () -> Unit,
     onReduceHealth: () -> Unit,
-    onPlayCard: (String, String?) -> Unit,
+    onPlayCard: (String, List<String>) -> Unit,
     onStartGame: () -> Unit,
     onEndTurn: (String) -> Unit
 ) {
@@ -837,6 +945,11 @@ fun CurrentPlayerActions(
             
             Spacer(modifier = Modifier.height(16.dp))
             
+            // 装备区
+            EquipmentArea(player = player)
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
             // 手牌展示
             Text(
                 text = "手牌 (${player.cards.size}张)",
@@ -851,7 +964,7 @@ fun CurrentPlayerActions(
                 items(player.cards) { card ->
                     GameCard(
                         card = card,
-                        onClick = { onPlayCard(card.id, null) }
+                        onClick = { onPlayCard(card.id, emptyList()) }
                     )
                 }
             }
@@ -865,10 +978,19 @@ fun GameCard(
     onClick: () -> Unit
 ) {
     val cardColor = when (card.type) {
-        CardType.ATTACK -> DamageRed.copy(alpha = 0.8f)
-        CardType.DEFENSE -> TouhouBlue.copy(alpha = 0.8f)
-        CardType.RECOVERY -> HealthGreen.copy(alpha = 0.8f)
-        CardType.SKILL -> TouhouGold.copy(alpha = 0.8f)
+        CardType.BASIC -> when (card.name) {
+            "杀" -> DamageRed.copy(alpha = 0.8f)
+            "闪" -> TouhouBlue.copy(alpha = 0.8f) 
+            "桃" -> HealthGreen.copy(alpha = 0.8f)
+            else -> TouhouGold.copy(alpha = 0.8f)
+        }
+        CardType.TRICK -> TouhouGold.copy(alpha = 0.8f)
+        CardType.EQUIPMENT -> when (card.subType) {
+            CardSubType.WEAPON -> DamageRed.copy(alpha = 0.6f)
+            CardSubType.ARMOR -> TouhouBlue.copy(alpha = 0.6f)
+            CardSubType.HORSE -> HealthGreen.copy(alpha = 0.6f)
+            else -> TouhouGold.copy(alpha = 0.6f)
+        }
     }
     
     Card(
@@ -926,10 +1048,19 @@ fun GameCard(
 @Composable
 fun PlayedCardDisplay(playedCard: moe.gensoukyo.tbc.shared.model.PlayedCard) {
     val cardColor = when (playedCard.card.type) {
-        CardType.ATTACK -> DamageRed.copy(alpha = 0.8f)
-        CardType.DEFENSE -> TouhouBlue.copy(alpha = 0.8f)
-        CardType.RECOVERY -> HealthGreen.copy(alpha = 0.8f)
-        CardType.SKILL -> TouhouGold.copy(alpha = 0.8f)
+        CardType.BASIC -> when (playedCard.card.name) {
+            "杀" -> DamageRed.copy(alpha = 0.8f)
+            "闪" -> TouhouBlue.copy(alpha = 0.8f) 
+            "桃" -> HealthGreen.copy(alpha = 0.8f)
+            else -> TouhouGold.copy(alpha = 0.8f)
+        }
+        CardType.TRICK -> TouhouGold.copy(alpha = 0.8f)
+        CardType.EQUIPMENT -> when (playedCard.card.subType) {
+            CardSubType.WEAPON -> DamageRed.copy(alpha = 0.6f)
+            CardSubType.ARMOR -> TouhouBlue.copy(alpha = 0.6f)
+            CardSubType.HORSE -> HealthGreen.copy(alpha = 0.6f)
+            else -> TouhouGold.copy(alpha = 0.6f)
+        }
     }
     
     Card(
@@ -1052,7 +1183,7 @@ fun GameCardPreview() {
                 card = Card(
                     id = "1",
                     name = "杀",
-                    type = CardType.ATTACK,
+                    type = CardType.BASIC,
                     effect = "造成1点伤害",
                     damage = 1
                 ),
@@ -1063,7 +1194,7 @@ fun GameCardPreview() {
                 card = Card(
                     id = "2",
                     name = "桃",
-                    type = CardType.RECOVERY,
+                    type = CardType.BASIC,
                     effect = "恢复1点生命",
                     healing = 1
                 ),
@@ -1074,9 +1205,8 @@ fun GameCardPreview() {
                 card = Card(
                     id = "3",
                     name = "闪",
-                    type = CardType.DEFENSE,
-                    effect = "抵消攻击",
-                    damage = 0
+                    type = CardType.BASIC,
+                    effect = "抵消攻击"
                 ),
                 onClick = {}
             )
@@ -1085,7 +1215,7 @@ fun GameCardPreview() {
                 card = Card(
                     id = "4",
                     name = "决斗",
-                    type = CardType.SKILL,
+                    type = CardType.TRICK,
                     effect = "与目标决斗",
                     damage = 1
                 ),
@@ -1100,9 +1230,9 @@ fun GameCardPreview() {
 fun GameRoomScreenPreview() {
     TouhouBrawlChroniclesTheme {
         val sampleCards = listOf(
-            Card("1", "杀", CardType.ATTACK, "造成1点伤害", 1, 0),
-            Card("2", "桃", CardType.RECOVERY, "恢复1点生命", 0, 1),
-            Card("3", "闪", CardType.DEFENSE, "抵消攻击", 0, 0)
+            Card("1", "杀", CardType.BASIC, "造成1点伤害", 1, 0),
+            Card("2", "桃", CardType.BASIC, "恢复1点生命", 0, 1),
+            Card("3", "闪", CardType.BASIC, "抵消攻击", 0, 0)
         )
         
         val currentPlayer = Player(
@@ -1604,10 +1734,19 @@ fun PlayedCardsHistoryDialog(
                                                 .height(80.dp),
                                             colors = CardDefaults.cardColors(
                                                 containerColor = when (playedCard.card.type) {
-                                                    CardType.ATTACK -> DamageRed.copy(alpha = 0.7f)
-                                                    CardType.DEFENSE -> TouhouBlue.copy(alpha = 0.7f)
-                                                    CardType.RECOVERY -> HealthGreen.copy(alpha = 0.7f)
-                                                    CardType.SKILL -> TouhouGold.copy(alpha = 0.7f)
+                                                    CardType.BASIC -> when (playedCard.card.name) {
+                                                        "杀" -> DamageRed.copy(alpha = 0.7f)
+                                                        "闪" -> TouhouBlue.copy(alpha = 0.7f) 
+                                                        "桃" -> HealthGreen.copy(alpha = 0.7f)
+                                                        else -> TouhouGold.copy(alpha = 0.7f)
+                                                    }
+                                                    CardType.TRICK -> TouhouGold.copy(alpha = 0.7f)
+                                                    CardType.EQUIPMENT -> when (playedCard.card.subType) {
+                                                        CardSubType.WEAPON -> DamageRed.copy(alpha = 0.5f)
+                                                        CardSubType.ARMOR -> TouhouBlue.copy(alpha = 0.5f)
+                                                        CardSubType.HORSE -> HealthGreen.copy(alpha = 0.5f)
+                                                        else -> TouhouGold.copy(alpha = 0.5f)
+                                                    }
                                                 }
                                             )
                                         ) {

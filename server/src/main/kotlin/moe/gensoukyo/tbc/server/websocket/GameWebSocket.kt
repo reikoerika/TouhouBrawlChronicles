@@ -74,9 +74,9 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 val roomId = findPlayerRoom(gameService, playerId)
                                 
                                 if (roomId != null) {
-                                    val card = gameService.drawCard(roomId, playerId)
-                                    if (card != null) {
-                                        send(Json.encodeToString<ServerMessage>(ServerMessage.CardDrawn(playerId, card)))
+                                    val cards = gameService.drawCard(roomId, playerId, 1)
+                                    if (cards.isNotEmpty()) {
+                                        send(Json.encodeToString<ServerMessage>(ServerMessage.CardsDrawn(playerId, cards)))
                                     }
                                 }
                             }
@@ -169,7 +169,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 val roomId = findPlayerRoom(gameService, playerId)
                                 
                                 if (roomId != null) {
-                                    val playedCard = gameService.playCard(roomId, playerId, message.cardId, message.targetId)
+                                    val playedCard = gameService.playCard(roomId, playerId, message.cardId, message.targetIds)
                                     if (playedCard != null) {
                                         val room = gameService.getRoom(roomId)!!
                                         broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
