@@ -143,6 +143,18 @@ class GameClient {
             is ServerMessage.Error -> {
                 println("\\n错误: ${message.message}")
             }
+
+            is ServerMessage.CardPlayed -> TODO()
+            is ServerMessage.CardResolved -> TODO()
+            is ServerMessage.CardResponseReceived -> TODO()
+            is ServerMessage.CardResponseRequired -> TODO()
+            is ServerMessage.CardsDrawn -> TODO()
+            is ServerMessage.GameStarted -> TODO()
+            is ServerMessage.InitialCardsDealt -> TODO()
+            is ServerMessage.PlayerOrderChanged -> TODO()
+            is ServerMessage.RoomList -> TODO()
+            is ServerMessage.SpectatorJoined -> TODO()
+            is ServerMessage.TurnStarted -> TODO()
         }
     }
     
@@ -255,7 +267,7 @@ class GameClient {
         
         // 如果是攻击卡，需要选择目标
         var targetId: String? = null
-        if (card.type == moe.gensoukyo.tbc.shared.model.CardType.ATTACK) {
+        if (card.type == moe.gensoukyo.tbc.shared.model.CardType.BASIC) {
             val room = currentRoom ?: return
             val otherPlayers = room.players.filter { it.id != player.id }
             

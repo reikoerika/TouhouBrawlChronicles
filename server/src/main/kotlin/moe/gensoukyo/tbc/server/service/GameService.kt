@@ -369,7 +369,8 @@ class GameService {
                 isDuel = card.name == "决斗",
                 duelCurrentPlayer = if (card.name == "决斗") target.id else null,
                 duelInitiator = if (card.name == "决斗") playerId else null,
-                duelTarget = if (card.name == "决斗") target.id else null
+                duelTarget = if (card.name == "决斗") target.id else null,
+                isAbundantHarvest = card.name == "五谷丰登"
             )
             
             room.pendingResponse = pendingResponse

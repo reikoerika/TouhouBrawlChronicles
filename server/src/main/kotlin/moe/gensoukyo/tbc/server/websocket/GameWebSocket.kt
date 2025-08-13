@@ -182,75 +182,66 @@ fun Route.gameWebSocket(gameService: GameService) {
                             
                             is ClientMessage.PlayCard -> {
                                 val playerId = message.playerId
-                                val roomId = findPlayerRoom(gameService, playerId)
+                                val roomId = findPlayerRoom(gameService, playerId)?: return@webSocket
                                 
-                                if (roomId != null) {
-                                    val result = gameService.playCard(roomId, playerId, message.cardId, message.targetIds)
-                                    if (result != null) {
-                                        val (playedCard, pendingResponse) = result
-                                        val room = gameService.getRoom(roomId)!!
-                                        
-                                        if (pendingResponse != null) {
-                                            if (pendingResponse.isAbundantHarvest) {
-                                                // 五谷丰登特殊处理
-                                                if (playedCard != null) {
-                                                    broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                                        ServerMessage.CardPlayed(playedCard, room)
-                                                    }
-                                                }
-                                                
-                                                // 广播五谷丰登开始
-                                                broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                                    ServerMessage.AbundantHarvestStarted(
-                                                        availableCards = pendingResponse.availableCards,
-                                                        currentPlayerIndex = pendingResponse.currentSelectionPlayerIndex,
-                                                        room = room
-                                                    )
-                                                }
-                                                
-                                                // 通知第一个玩家选择
-                                                val firstPlayerSessionId = playerSessions[pendingResponse.targetPlayerId]
-                                                val firstPlayerSession = connections[firstPlayerSessionId]
-                                                firstPlayerSession?.send(
-                                                    Json.encodeToString<ServerMessage>(
-                                                        ServerMessage.AbundantHarvestSelection(
-                                                            playerId = pendingResponse.targetPlayerId,
-                                                            playerName = room.players.find { it.id == pendingResponse.targetPlayerId }?.name ?: "未知",
-                                                            availableCards = pendingResponse.availableCards,
-                                                            room = room
-                                                        )
-                                                    )
-                                                )
-                                            } else {
-                                                // 其他需要响应的卡牌处理
-                                                if (playedCard != null) {
-                                                    broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                                        ServerMessage.CardPlayed(playedCard, room)
-                                                    }
-                                                }
-                                                
-                                                // 发送响应请求
-                                                val targetSessionId = playerSessions[pendingResponse.targetPlayerId]
-                                                val targetSession = connections[targetSessionId]
-                                                targetSession?.send(
-                                                    Json.encodeToString<ServerMessage>(
-                                                        ServerMessage.CardResponseRequired(
-                                                            targetPlayerId = pendingResponse.targetPlayerId,
-                                                            originalCard = pendingResponse.originalCard,
-                                                            originalPlayer = room.players.find { it.id == pendingResponse.originalPlayerId }?.name ?: "未知",
-                                                            responseType = pendingResponse.responseType
-                                                        )
-                                                    )
-                                                )
-                                            }
-                                        } else if (playedCard != null) {
-                                            // 不需要响应，直接广播结果
-                                            broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                                ServerMessage.CardPlayed(playedCard, room)
-                                            }
+                                val result = gameService.playCard(roomId, playerId, message.cardId, message.targetIds)?: return@webSocket
+                                val (playedCard, pendingResponse) = result
+                                val room = gameService.getRoom(roomId)!!
+                                if (pendingResponse == null)
+                                    return@webSocket
+                                if (pendingResponse.isAbundantHarvest) {
+                                    // 五谷丰登特殊处理
+                                    if (playedCard != null) {
+                                        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
+                                            ServerMessage.CardPlayed(playedCard, room)
                                         }
                                     }
+
+                                    // 广播五谷丰登开始
+                                    broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
+                                        ServerMessage.AbundantHarvestStarted(
+                                            availableCards = pendingResponse.availableCards,
+                                            currentPlayerIndex = pendingResponse.currentSelectionPlayerIndex,
+                                            room = room
+                                        )
+                                    }
+
+                                    // 通知第一个玩家选择
+                                    val firstPlayerSessionId = playerSessions[pendingResponse.targetPlayerId]
+                                    val firstPlayerSession = connections[firstPlayerSessionId]
+                                    firstPlayerSession?.send(
+                                        Json.encodeToString<ServerMessage>(
+                                            ServerMessage.AbundantHarvestSelection(
+                                                playerId = pendingResponse.targetPlayerId,
+                                                playerName = room.players.find { it.id == pendingResponse.targetPlayerId }?.name ?: "未知",
+                                                availableCards = pendingResponse.availableCards,
+                                                room = room
+                                            )
+                                        )
+                                    )
+                                } else {
+                                    // 其他需要响应的卡牌处理
+                                    if (playedCard != null) {
+                                        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
+                                            ServerMessage.CardPlayed(playedCard, room)
+                                        }
+                                    }
+
+                                    // 发送响应请求
+                                    val targetSessionId = playerSessions[pendingResponse.targetPlayerId]
+                                    val targetSession = connections[targetSessionId]
+                                    targetSession?.send(
+                                        Json.encodeToString<ServerMessage>(
+                                            ServerMessage.CardResponseRequired(
+                                                targetPlayerId = pendingResponse.targetPlayerId,
+                                                originalCard = pendingResponse.originalCard,
+                                                originalPlayer = room.players.find { it.id == pendingResponse.originalPlayerId }?.name ?: "未知",
+                                                responseType = pendingResponse.responseType
+                                            )
+                                        )
+                                    )
                                 }
+
                             }
                             
                             is ClientMessage.SelectAbundantHarvestCard -> {
@@ -334,11 +325,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                             broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
                                                 ServerMessage.CardResponseReceived(
                                                     playerId = playerId,
-                                                    responseCard = room.players.find { it.id == playerId }?.let { player ->
-                                                        message.responseCardId?.let { cardId ->
-                                                            null // 简化处理
-                                                        }
-                                                    },
+                                                    responseCard = null,
                                                     accepted = message.accept,
                                                     room = room
                                                 )
@@ -347,9 +334,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                             // 决斗结束或其他响应完成，广播最终结果
                                             broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
                                                 ServerMessage.CardResolved(
-                                                    originalCard = result.let {
-                                                        Card("", "决斗", CardType.TRICK, "")
-                                                    },
+                                                    originalCard = Card("", "决斗", CardType.TRICK, ""),
                                                     responses = emptyList(),
                                                     result = result,
                                                     room = room
