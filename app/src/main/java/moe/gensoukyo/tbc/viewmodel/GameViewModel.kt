@@ -20,6 +20,7 @@ import moe.gensoukyo.tbc.shared.messages.ClientMessage
 import moe.gensoukyo.tbc.shared.messages.ServerMessage
 import moe.gensoukyo.tbc.shared.model.GameRoom
 import moe.gensoukyo.tbc.shared.model.Player
+import moe.gensoukyo.tbc.shared.model.Spectator
 
 class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val preferencesManager = PreferencesManager.getInstance(application)
@@ -102,7 +103,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         // 保存玩家名称和房间ID
         preferencesManager.savePlayerName(playerName)
         preferencesManager.saveLastRoomId(roomId)
-        sendMessage(ClientMessage.JoinRoom(roomId, playerName))
+        sendMessage(ClientMessage.JoinRoom(roomId, playerName, spectateOnly = false))
+    }
+    
+    fun spectateRoom(roomId: String, playerName: String) {
+        // 以观战者身份加入房间
+        preferencesManager.savePlayerName(playerName)
+        preferencesManager.saveLastRoomId(roomId)
+        sendMessage(ClientMessage.JoinRoom(roomId, playerName, spectateOnly = true))
     }
     
     fun drawCard() {
@@ -140,6 +148,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         joinRoom(roomId, playerName)
     }
     
+    fun startGame(roomId: String) {
+        sendMessage(ClientMessage.StartGame(roomId))
+    }
+    
+    fun endTurn(playerId: String) {
+        sendMessage(ClientMessage.EndTurn(playerId))
+    }
+    
+    fun adjustPlayerOrder(roomId: String, newOrder: List<String>) {
+        sendMessage(ClientMessage.AdjustPlayerOrder(roomId, newOrder))
+    }
+    
+    fun playCard(cardId: String, targetId: String? = null) {
+        _uiState.value.currentPlayer?.let { player ->
+            sendMessage(ClientMessage.PlayCard(player.id, cardId, targetId))
+        }
+    }
+    
     private fun sendMessage(message: ClientMessage) {
         viewModelScope.launch {
             try {
@@ -164,6 +190,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.value = _uiState.value.copy(
                     gameRoom = message.room,
                     currentPlayer = message.player,
+                    currentSpectator = null,
+                    isSpectating = false,
+                    errorMessage = null
+                )
+            }
+            
+            is ServerMessage.SpectatorJoined -> {
+                _uiState.value = _uiState.value.copy(
+                    gameRoom = message.room,
+                    currentPlayer = null,
+                    currentSpectator = message.spectator,
+                    isSpectating = true,
                     errorMessage = null
                 )
             }
@@ -211,6 +249,31 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _roomList.value = message.rooms
             }
             
+            is ServerMessage.GameStarted -> {
+                _uiState.value = _uiState.value.copy(
+                    gameRoom = message.room,
+                    errorMessage = null
+                )
+            }
+            
+            is ServerMessage.TurnStarted -> {
+                _uiState.value = _uiState.value.copy(errorMessage = "轮到 ${message.playerId} 行动")
+            }
+            
+            is ServerMessage.PlayerOrderChanged -> {
+                _uiState.value = _uiState.value.copy(
+                    gameRoom = message.room,
+                    errorMessage = null
+                )
+            }
+            
+            is ServerMessage.CardPlayed -> {
+                _uiState.value = _uiState.value.copy(
+                    gameRoom = message.room,
+                    errorMessage = "${message.playedCard.playerName} 出了 ${message.playedCard.card.name}"
+                )
+            }
+            
             is ServerMessage.Error -> {
                 _uiState.value = _uiState.value.copy(errorMessage = message.message)
             }
@@ -229,6 +292,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 data class GameUiState(
     val gameRoom: GameRoom? = null,
     val currentPlayer: Player? = null,
+    val currentSpectator: Spectator? = null,
+    val isSpectating: Boolean = false,
     val errorMessage: String? = null
 )
 

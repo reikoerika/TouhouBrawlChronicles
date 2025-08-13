@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -43,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,6 +53,7 @@ import moe.gensoukyo.tbc.shared.model.Card
 import moe.gensoukyo.tbc.shared.model.CardType
 import moe.gensoukyo.tbc.shared.model.GameRoom
 import moe.gensoukyo.tbc.shared.model.GameState
+import moe.gensoukyo.tbc.shared.model.GamePhase
 import moe.gensoukyo.tbc.shared.model.Player
 import moe.gensoukyo.tbc.ui.theme.CardBackground
 import moe.gensoukyo.tbc.ui.theme.DamageRed
@@ -93,13 +97,15 @@ fun GameScreen(viewModel: GameViewModel) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 连接状态指示器
-        ConnectionStatusBar(
-            connectionState = connectionState,
-            serverUrl = serverUrl,
-            onServerSettings = { showServerDialog = true },
-            onReconnect = { viewModel.connectToServer(serverUrl) }
-        )
+        // 连接状态指示器 - 只在非游戏状态或连接异常时显示
+        if (uiState.gameRoom == null || connectionState != ConnectionState.CONNECTED) {
+            ConnectionStatusBar(
+                connectionState = connectionState,
+                serverUrl = serverUrl,
+                onServerSettings = { showServerDialog = true },
+                onReconnect = { viewModel.connectToServer(serverUrl) }
+            )
+        }
         
         // 错误消息
         uiState.errorMessage?.let { error ->
@@ -123,15 +129,27 @@ fun GameScreen(viewModel: GameViewModel) {
                 onShowRoomList = { showRoomList = true }
             )
         } else {
-            // 游戏界面
-            GameRoomScreen(
-                gameRoom = uiState.gameRoom!!,
-                currentPlayer = uiState.currentPlayer,
-                onDrawCard = { viewModel.drawCard() },
-                onAddHealth = { viewModel.addHealth(10) },
-                onReduceHealth = { viewModel.reduceHealth(10) },
-                onUseCard = { cardId, targetId -> viewModel.useCard(cardId, targetId) }
-            )
+            // 游戏界面 - 添加滚动支持
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                GameRoomScreen(
+                    gameRoom = uiState.gameRoom!!,
+                    currentPlayer = uiState.currentPlayer,
+                    isSpectating = uiState.isSpectating,
+                    onDrawCard = { viewModel.drawCard() },
+                    onAddHealth = { viewModel.addHealth(10) },
+                    onReduceHealth = { viewModel.reduceHealth(10) },
+                    onPlayCard = { cardId, targetId -> viewModel.playCard(cardId, targetId) },
+                    onStartGame = { viewModel.startGame(uiState.gameRoom!!.id) },
+                    onEndTurn = { playerId -> viewModel.endTurn(playerId) },
+                    onAdjustOrder = { newOrder -> viewModel.adjustPlayerOrder(uiState.gameRoom!!.id, newOrder) }
+                )
+            }
         }
     }
     
@@ -397,34 +415,84 @@ fun GameLobby(
 
 @Composable
 fun GameRoomScreen(
-    gameRoom: moe.gensoukyo.tbc.shared.model.GameRoom,
+    gameRoom: GameRoom,
     currentPlayer: Player?,
+    isSpectating: Boolean = false,
     onDrawCard: () -> Unit,
     onAddHealth: () -> Unit,
     onReduceHealth: () -> Unit,
-    onUseCard: (String, String?) -> Unit
+    onPlayCard: (String, String?) -> Unit,
+    onStartGame: () -> Unit,
+    onEndTurn: (String) -> Unit,
+    onAdjustOrder: (List<String>) -> Unit
 ) {
+    var showGameInfo by remember { mutableStateOf(false) }
+    var showPlayerOrder by remember { mutableStateOf(false) }
+    var showPlayedCards by remember { mutableStateOf(false) }
+    
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 房间信息
+        // 房间信息和游戏状态
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "房间: ${gameRoom.name}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "房间ID: ${gameRoom.id}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
-                Text(
-                    text = "游戏状态: ${gameRoom.gameState}",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "房间: ${gameRoom.name}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "房间ID: ${gameRoom.id.take(8)}...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            overflow = TextOverflow.Ellipsis,
+                            maxLines = 1
+                        )
+                    }
+                    
+                    Column(horizontalAlignment = Alignment.End) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Button(
+                                onClick = { showGameInfo = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = TouhouBlue),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("信息", fontSize = 11.sp)
+                            }
+                            
+                            Button(
+                                onClick = { showPlayedCards = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = TouhouRed),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("记录", fontSize = 11.sp)
+                            }
+                        }
+                        
+                        if (gameRoom.gameState == GameState.WAITING) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Button(
+                                onClick = { showPlayerOrder = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = TouhouGold),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("调整顺序", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // 游戏状态信息
+                GameStatusInfo(gameRoom = gameRoom)
             }
         }
         
@@ -432,13 +500,14 @@ fun GameRoomScreen(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "玩家列表 (${gameRoom.players.size}/${gameRoom.maxPlayers})",
+                    text = "玩家列表 (${gameRoom.players.size}/${gameRoom.maxPlayers})" + 
+                           if (gameRoom.spectators.isNotEmpty()) " · 观战者 ${gameRoom.spectators.size}人" else "",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
                 
                 LazyColumn(
-                    modifier = Modifier.height(120.dp),
+                    modifier = Modifier.height(150.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(gameRoom.players) { player ->
@@ -447,20 +516,112 @@ fun GameRoomScreen(
                             isCurrentPlayer = player.id == currentPlayer?.id
                         )
                     }
+                    
+                    // 显示观战者
+                    if (gameRoom.spectators.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "观战者:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+                        items(gameRoom.spectators) { spectator ->
+                            SpectatorCard(spectator = spectator)
+                        }
+                    }
                 }
             }
         }
         
-        // 当前玩家操作区
-        currentPlayer?.let { player ->
-            CurrentPlayerActions(
-                player = player,
-                onDrawCard = onDrawCard,
-                onAddHealth = onAddHealth,
-                onReduceHealth = onReduceHealth,
-                onUseCard = onUseCard
-            )
+        // 当前回合出牌区域
+        if (gameRoom.gameState == GameState.PLAYING && gameRoom.currentTurnPlayedCards.isNotEmpty()) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "当前回合出牌 (${gameRoom.currentTurnPlayedCards.size}张)",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(gameRoom.currentTurnPlayedCards) { playedCard ->
+                            PlayedCardDisplay(playedCard = playedCard)
+                        }
+                    }
+                }
+            }
         }
+        
+        // 当前玩家操作区 - 只有非观战模式才显示
+        if (!isSpectating) {
+            currentPlayer?.let { player ->
+                CurrentPlayerActions(
+                    player = player,
+                    gameRoom = gameRoom,
+                    onDrawCard = onDrawCard,
+                    onAddHealth = onAddHealth,
+                    onReduceHealth = onReduceHealth,
+                    onPlayCard = onPlayCard,
+                    onStartGame = onStartGame,
+                    onEndTurn = onEndTurn
+                )
+            }
+        } else {
+            // 观战模式提示
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "👀 观战模式",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TouhouBlue
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "您正在观看游戏进行",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
+        }
+    }
+    
+    // 游戏信息对话框
+    if (showGameInfo) {
+        GameInfoDialog(
+            gameRoom = gameRoom,
+            onDismiss = { showGameInfo = false }
+        )
+    }
+    
+    // 玩家顺序调整对话框
+    if (showPlayerOrder) {
+        PlayerOrderDialog(
+            players = gameRoom.players,
+            onReorder = onAdjustOrder,
+            onDismiss = { showPlayerOrder = false }
+        )
+    }
+    
+    // 历史出牌记录对话框
+    if (showPlayedCards) {
+        PlayedCardsHistoryDialog(
+            players = gameRoom.players,
+            onDismiss = { showPlayedCards = false }
+        )
     }
 }
 
@@ -521,12 +682,44 @@ fun PlayerCard(
 }
 
 @Composable
+fun SpectatorCard(spectator: moe.gensoukyo.tbc.shared.model.Spectator) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.Gray.copy(alpha = 0.1f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "👀 ${spectator.name}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.Gray
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = "观战中",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+        }
+    }
+}
+
+@Composable
 fun CurrentPlayerActions(
     player: Player,
+    gameRoom: GameRoom,
     onDrawCard: () -> Unit,
     onAddHealth: () -> Unit,
     onReduceHealth: () -> Unit,
-    onUseCard: (String, String?) -> Unit
+    onPlayCard: (String, String?) -> Unit,
+    onStartGame: () -> Unit,
+    onEndTurn: (String) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -538,33 +731,107 @@ fun CurrentPlayerActions(
             
             Spacer(modifier = Modifier.height(12.dp))
             
-            // 操作按钮
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onDrawCard,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = TouhouBlue)
-                ) {
-                    Text("抽卡")
+            // 根据游戏状态显示不同按钮
+            when (gameRoom.gameState) {
+                GameState.WAITING -> {
+                    Button(
+                        onClick = onStartGame,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = TouhouRed)
+                    ) {
+                        Text("开始游戏", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
                 
-                Button(
-                    onClick = onAddHealth,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = HealthGreen)
-                ) {
-                    Text("加血")
+                GameState.PLAYING -> {
+                    // 检查是否是当前玩家
+                    val currentPlayer = if (gameRoom.players.isNotEmpty()) {
+                        gameRoom.players[gameRoom.currentPlayerIndex]
+                    } else null
+                    
+                    if (currentPlayer?.id == player.id) {
+                        // 当前玩家的操作
+                        Column {
+                            Text(
+                                text = "轮到你行动 - ${when(gameRoom.gamePhase) {
+                                    GamePhase.DRAW -> "摸牌阶段"
+                                    GamePhase.PLAY -> "出牌阶段"
+                                    GamePhase.DISCARD -> "弃牌阶段"
+                                }}",
+                                color = TouhouRed,
+                                fontWeight = FontWeight.Bold
+                            )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            // 操作按钮
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = onDrawCard,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = TouhouBlue)
+                                ) {
+                                    Text("抽卡", fontSize = 16.sp)
+                                }
+                                
+                                Button(
+                                    onClick = onAddHealth,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = HealthGreen)
+                                ) {
+                                    Text("加血", fontSize = 16.sp)
+                                }
+                                
+                                Button(
+                                    onClick = onReduceHealth,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = DamageRed)
+                                ) {
+                                    Text("扣血", fontSize = 16.sp)
+                                }
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Button(
+                                onClick = { onEndTurn(player.id) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = TouhouGold)
+                            ) {
+                                Text("结束回合", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        // 等待其他玩家
+                        Text(
+                            text = "等待 ${currentPlayer?.name ?: "其他玩家"} 行动中...",
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
                 
-                Button(
-                    onClick = onReduceHealth,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = DamageRed)
-                ) {
-                    Text("扣血")
+                GameState.FINISHED -> {
+                    Text(
+                        text = "游戏结束",
+                        color = Color.Gray,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
             
@@ -584,7 +851,7 @@ fun CurrentPlayerActions(
                 items(player.cards) { card ->
                     GameCard(
                         card = card,
-                        onClick = { onUseCard(card.id, null) }
+                        onClick = { onPlayCard(card.id, null) }
                     )
                 }
             }
@@ -651,6 +918,73 @@ fun GameCard(
                 text = card.type.name,
                 color = Color.White.copy(alpha = 0.8f),
                 fontSize = 10.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun PlayedCardDisplay(playedCard: moe.gensoukyo.tbc.shared.model.PlayedCard) {
+    val cardColor = when (playedCard.card.type) {
+        CardType.ATTACK -> DamageRed.copy(alpha = 0.8f)
+        CardType.DEFENSE -> TouhouBlue.copy(alpha = 0.8f)
+        CardType.RECOVERY -> HealthGreen.copy(alpha = 0.8f)
+        CardType.SKILL -> TouhouGold.copy(alpha = 0.8f)
+    }
+    
+    Card(
+        modifier = Modifier
+            .width(100.dp)
+            .height(140.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = playedCard.card.name,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center
+            )
+            
+            Text(
+                text = playedCard.playerName,
+                color = Color.White.copy(alpha = 0.8f),
+                fontSize = 10.sp,
+                textAlign = TextAlign.Center
+            )
+            
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (playedCard.card.damage > 0) {
+                    Text(
+                        text = "伤害: ${playedCard.card.damage}",
+                        color = Color.White,
+                        fontSize = 10.sp
+                    )
+                }
+                
+                if (playedCard.card.healing > 0) {
+                    Text(
+                        text = "治疗: ${playedCard.card.healing}",
+                        color = Color.White,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+            
+            Text(
+                text = playedCard.card.type.name,
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 8.sp
             )
         }
     }
@@ -788,10 +1122,10 @@ fun GameRoomScreenPreview() {
         )
         
         val gameRoom = GameRoom(
-            id = "room123",
+            id = "room123".repeat(10),
             name = "测试房间",
             players = mutableListOf(currentPlayer, otherPlayer),
-            currentPlayer = "player1",
+            currentPlayerIndex = 0,
             gameState = GameState.PLAYING,
             maxPlayers = 8
         )
@@ -802,7 +1136,10 @@ fun GameRoomScreenPreview() {
             onDrawCard = {},
             onAddHealth = {},
             onReduceHealth = {},
-            onUseCard = { _, _ -> }
+            onPlayCard = { _, _ -> },
+            onStartGame = {},
+            onEndTurn = { _ -> },
+            onAdjustOrder = { _ -> }
         )
     }
 }
@@ -1005,4 +1342,317 @@ fun RoomListItem(
             }
         }
     }
+}
+
+@Composable
+fun GameStatusInfo(gameRoom: GameRoom) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            Text(
+                text = "游戏状态: ${when(gameRoom.gameState) {
+                    GameState.WAITING -> "等待开始"
+                    GameState.PLAYING -> "进行中"
+                    GameState.FINISHED -> "已结束"
+                }}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            
+            if (gameRoom.gameState == GameState.PLAYING) {
+                Text(
+                    text = "第 ${gameRoom.turnCount} 回合",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            }
+        }
+        
+        if (gameRoom.gameState == GameState.PLAYING) {
+            Column(horizontalAlignment = Alignment.End) {
+                val currentPlayer = if (gameRoom.players.isNotEmpty()) {
+                    gameRoom.players[gameRoom.currentPlayerIndex]
+                } else null
+                
+                Text(
+                    text = "当前玩家: ${currentPlayer?.name ?: "未知"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = TouhouRed
+                )
+                Text(
+                    text = "阶段: ${when(gameRoom.gamePhase) {
+                        GamePhase.DRAW -> "摸牌"
+                        GamePhase.PLAY -> "出牌"
+                        GamePhase.DISCARD -> "弃牌"
+                    }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TouhouBlue
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun GameInfoDialog(
+    gameRoom: GameRoom,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("游戏详细信息") },
+        text = {
+            LazyColumn {
+                item {
+                    Text(
+                        text = "房间信息",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text("房间名称: ${gameRoom.name}")
+                    Text("房间ID: ${gameRoom.id}")
+                    Text("最大玩家数: ${gameRoom.maxPlayers}")
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text(
+                        text = "游戏状态",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text("状态: ${gameRoom.gameState}")
+                    if (gameRoom.gameState == GameState.PLAYING) {
+                        Text("回合数: ${gameRoom.turnCount}")
+                        Text("当前阶段: ${gameRoom.gamePhase}")
+                        val currentPlayer = if (gameRoom.players.isNotEmpty()) {
+                            gameRoom.players[gameRoom.currentPlayerIndex]
+                        } else null
+                        Text("当前玩家: ${currentPlayer?.name ?: "未知"}")
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text(
+                        text = "玩家列表",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                
+                items(gameRoom.players) { player ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            val currentPlayer = if (gameRoom.players.isNotEmpty()) {
+                                gameRoom.players[gameRoom.currentPlayerIndex]
+                            } else null
+                            
+                            Text(
+                                text = "${player.name} ${if (player.id == currentPlayer?.id) "(当前)" else ""}",
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text("生命值: ${player.health}/${player.maxHealth}")
+                            Text("手牌数: ${player.cards.size}")
+                            Text("已出牌数: ${player.playedCards.size}")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        }
+    )
+}
+
+@Composable
+fun PlayerOrderDialog(
+    players: List<Player>,
+    onReorder: (List<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var playerOrder by remember { mutableStateOf(players.map { it.id }) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("调整出牌顺序") },
+        text = {
+            LazyColumn {
+                items(playerOrder.size) { index ->
+                    val playerId = playerOrder[index]
+                    val player = players.find { it.id == playerId }
+                    
+                    if (player != null) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("${index + 1}. ${player.name}")
+                                
+                                Row {
+                                    if (index > 0) {
+                                        Button(
+                                            onClick = {
+                                                val newOrder = playerOrder.toMutableList()
+                                                val temp = newOrder[index]
+                                                newOrder[index] = newOrder[index - 1]
+                                                newOrder[index - 1] = temp
+                                                playerOrder = newOrder
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = TouhouBlue)
+                                        ) {
+                                            Text("↑", fontSize = 12.sp)
+                                        }
+                                    }
+                                    
+                                    if (index < playerOrder.size - 1) {
+                                        Button(
+                                            onClick = {
+                                                val newOrder = playerOrder.toMutableList()
+                                                val temp = newOrder[index]
+                                                newOrder[index] = newOrder[index + 1]
+                                                newOrder[index + 1] = temp
+                                                playerOrder = newOrder
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = TouhouBlue)
+                                        ) {
+                                            Text("↓", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onReorder(playerOrder)
+                    onDismiss()
+                }
+            ) {
+                Text("确定")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@Composable
+fun PlayedCardsHistoryDialog(
+    players: List<Player>,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("出牌历史记录") },
+        text = {
+            LazyColumn {
+                items(players) { player ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "${player.name} (${player.playedCards.size}张)",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            
+                            if (player.playedCards.isEmpty()) {
+                                Text(
+                                    text = "尚未出牌",
+                                    color = Color.Gray,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            } else {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    items(player.playedCards.takeLast(5)) { playedCard ->
+                                        Card(
+                                            modifier = Modifier
+                                                .width(60.dp)
+                                                .height(80.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = when (playedCard.card.type) {
+                                                    CardType.ATTACK -> DamageRed.copy(alpha = 0.7f)
+                                                    CardType.DEFENSE -> TouhouBlue.copy(alpha = 0.7f)
+                                                    CardType.RECOVERY -> HealthGreen.copy(alpha = 0.7f)
+                                                    CardType.SKILL -> TouhouGold.copy(alpha = 0.7f)
+                                                }
+                                            )
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(4.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                Text(
+                                                    text = playedCard.card.name,
+                                                    color = Color.White,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                Text(
+                                                    text = "回合${playedCard.turnNumber}",
+                                                    color = Color.White.copy(alpha = 0.8f),
+                                                    fontSize = 6.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if (player.playedCards.size > 5) {
+                                    Text(
+                                        text = "...还有${player.playedCards.size - 5}张",
+                                        color = Color.Gray,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        }
+    )
 }

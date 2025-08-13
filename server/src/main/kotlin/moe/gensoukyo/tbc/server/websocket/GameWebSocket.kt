@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 fun Route.gameWebSocket(gameService: GameService) {
     val connections = ConcurrentHashMap<String, WebSocketSession>()
     val playerSessions = ConcurrentHashMap<String, String>() // playerId to sessionId
+    val spectatorSessions = ConcurrentHashMap<String, String>() // spectatorId to sessionId
     
     webSocket("/game") {
         val sessionId = java.util.UUID.randomUUID().toString()
@@ -40,16 +41,22 @@ fun Route.gameWebSocket(gameService: GameService) {
                             }
                             
                             is ClientMessage.JoinRoom -> {
-                                val result = gameService.joinRoom(message.roomId, message.playerName)
+                                val result = gameService.joinRoom(message.roomId, message.playerName, message.spectateOnly)
                                 if (result != null) {
-                                    val (room, player) = result
-                                    playerSessions[player.id] = sessionId
+                                    val (room, player, spectator) = result
                                     
-                                    // 通知加入成功
-                                    send(Json.encodeToString<ServerMessage>(ServerMessage.PlayerJoined(player, room)))
+                                    if (player != null) {
+                                        // 玩家加入或重连
+                                        playerSessions[player.id] = sessionId
+                                        send(Json.encodeToString<ServerMessage>(ServerMessage.PlayerJoined(player, room)))
+                                    } else if (spectator != null) {
+                                        // 观战者加入或重连
+                                        spectatorSessions[spectator.id] = sessionId
+                                        send(Json.encodeToString<ServerMessage>(ServerMessage.SpectatorJoined(spectator, room)))
+                                    }
                                     
-                                    // 通知房间内其他玩家
-                                    broadcastToRoom(connections, playerSessions, room.id, room, gameService) {
+                                    // 通知房间内所有人
+                                    broadcastToRoom(connections, playerSessions, spectatorSessions, room.id, room, gameService) {
                                         ServerMessage.GameStateUpdate(room)
                                     }
                                 } else {
@@ -81,7 +88,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 if (roomId != null) {
                                     val newHealth = gameService.updatePlayerHealth(roomId, playerId, message.amount)
                                     if (newHealth != null) {
-                                        broadcastToRoom(connections, playerSessions, roomId, gameService.getRoom(roomId)!!, gameService) {
+                                        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, gameService.getRoom(roomId)!!, gameService) {
                                             ServerMessage.HealthUpdated(playerId, newHealth)
                                         }
                                     }
@@ -96,8 +103,77 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     val success = gameService.useCard(roomId, playerId, message.cardId, message.targetId)
                                     if (success) {
                                         val room = gameService.getRoom(roomId)!!
-                                        broadcastToRoom(connections, playerSessions, roomId, room, gameService) {
+                                        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
                                             ServerMessage.GameStateUpdate(room)
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            is ClientMessage.StartGame -> {
+                                val room = gameService.startGame(message.roomId)
+                                if (room != null) {
+                                    broadcastToRoom(connections, playerSessions, spectatorSessions, message.roomId, room, gameService) {
+                                        ServerMessage.GameStarted(room)
+                                    }
+                                    
+                                    // 通知第一个玩家开始回合
+                                    room.currentPlayer?.let { currentPlayer ->
+                                        val currentPlayerSessionId = playerSessions[currentPlayer.id]
+                                        val currentPlayerSession = connections[currentPlayerSessionId]
+                                        currentPlayerSession?.send(
+                                            Json.encodeToString<ServerMessage>(
+                                                ServerMessage.TurnStarted(currentPlayer.id, room.gamePhase)
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            is ClientMessage.EndTurn -> {
+                                val playerId = message.playerId
+                                val roomId = findPlayerRoom(gameService, playerId)
+                                
+                                if (roomId != null) {
+                                    val room = gameService.nextTurn(roomId)
+                                    if (room != null) {
+                                        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
+                                            ServerMessage.GameStateUpdate(room)
+                                        }
+                                        
+                                        // 通知当前玩家开始回合
+                                        room.currentPlayer?.let { currentPlayer ->
+                                            val currentPlayerSessionId = playerSessions[currentPlayer.id]
+                                            val currentPlayerSession = connections[currentPlayerSessionId]
+                                            currentPlayerSession?.send(
+                                                Json.encodeToString<ServerMessage>(
+                                                    ServerMessage.TurnStarted(currentPlayer.id, room.gamePhase)
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            is ClientMessage.AdjustPlayerOrder -> {
+                                val room = gameService.adjustPlayerOrder(message.roomId, message.newOrder)
+                                if (room != null) {
+                                    broadcastToRoom(connections, playerSessions, spectatorSessions, message.roomId, room, gameService) {
+                                        ServerMessage.PlayerOrderChanged(room)
+                                    }
+                                }
+                            }
+                            
+                            is ClientMessage.PlayCard -> {
+                                val playerId = message.playerId
+                                val roomId = findPlayerRoom(gameService, playerId)
+                                
+                                if (roomId != null) {
+                                    val playedCard = gameService.playCard(roomId, playerId, message.cardId, message.targetId)
+                                    if (playedCard != null) {
+                                        val room = gameService.getRoom(roomId)!!
+                                        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
+                                            ServerMessage.CardPlayed(playedCard, room)
                                         }
                                     }
                                 }
@@ -112,8 +188,16 @@ fun Route.gameWebSocket(gameService: GameService) {
             // 客户端断开连接
         } finally {
             connections.remove(sessionId)
-            // 清理玩家会话映射
-            playerSessions.entries.removeIf { it.value == sessionId }
+            // 清理当前会话的玩家和观战者映射（但保留数据以支持重连）
+            val playersToRemove = playerSessions.entries.filter { it.value == sessionId }.map { it.key }
+            playersToRemove.forEach { playerId ->
+                playerSessions.remove(playerId)
+            }
+            
+            val spectatorsToRemove = spectatorSessions.entries.filter { it.value == sessionId }.map { it.key }
+            spectatorsToRemove.forEach { spectatorId ->
+                spectatorSessions.remove(spectatorId)
+            }
         }
     }
 }
@@ -127,6 +211,7 @@ private fun findPlayerRoom(gameService: GameService, playerId: String): String? 
 private suspend fun broadcastToRoom(
     connections: ConcurrentHashMap<String, WebSocketSession>,
     playerSessions: ConcurrentHashMap<String, String>,
+    spectatorSessions: ConcurrentHashMap<String, String>,
     roomId: String,
     room: moe.gensoukyo.tbc.shared.model.GameRoom,
     gameService: GameService,
@@ -134,8 +219,18 @@ private suspend fun broadcastToRoom(
 ) {
     val message = Json.encodeToString(messageFactory())
     
+    // 广播给玩家
     room.players.forEach { player ->
         val sessionId = playerSessions[player.id]
+        if (sessionId != null) {
+            val session = connections[sessionId]
+            session?.send(message)
+        }
+    }
+    
+    // 广播给观战者
+    room.spectators.forEach { spectator ->
+        val sessionId = spectatorSessions[spectator.id]
         if (sessionId != null) {
             val session = connections[sessionId]
             session?.send(message)
