@@ -508,11 +508,80 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.value = _uiState.value.copy(errorMessage = message.message)
             }
 
-            is ServerMessage.CardExecutionCompleted -> TODO()
-            is ServerMessage.CardExecutionStarted -> TODO()
-            is ServerMessage.ResponseReceived -> TODO()
-            is ServerMessage.ResponseRequired -> TODO()
-            is ServerMessage.SpecialExecutionStarted -> TODO()
+            is ServerMessage.CardExecutionStarted -> {
+                val currentState = _uiState.value
+                _uiState.value = currentState.copy(
+                    errorMessage = "${message.casterName}使用了${message.cardName}，目标：${message.targetNames.joinToString(", ")}"
+                )
+            }
+            
+            is ServerMessage.ResponseRequired -> {
+                val currentState = _uiState.value
+                if (currentState.currentPlayer?.id == message.targetPlayerId) {
+                    val responseMessage = when (message.responseType) {
+                        "NULLIFICATION" -> "是否使用无懈可击响应${message.originalCard.name}"
+                        "SPECIAL_SELECTION" -> "请选择一个选项"
+                        else -> "需要响应${message.originalCard.name}"
+                    }
+                    
+                    _uiState.value = currentState.copy(
+                        needsResponse = true,
+                        errorMessage = responseMessage,
+                        responseTimeoutMs = message.timeoutMs,
+                        responseType = if (message.responseType == "NULLIFICATION") ResponseType.NULLIFICATION 
+                                     else if (message.responseType == "SPECIAL_SELECTION") ResponseType.ABUNDANT_HARVEST
+                                     else ResponseType.OPTIONAL
+                    )
+                }
+            }
+            
+            is ServerMessage.ResponseReceived -> {
+                val currentState = _uiState.value
+                val responseMsg = if (message.accepted) {
+                    "${message.playerName}响应了${message.responseCard?.name ?: "请求"}"
+                } else {
+                    "${message.playerName}选择不响应"
+                }
+                _uiState.value = currentState.copy(
+                    gameRoom = message.room,
+                    errorMessage = responseMsg
+                )
+            }
+            
+            is ServerMessage.SpecialExecutionStarted -> {
+                val currentState = _uiState.value
+                if (currentState.currentPlayer?.id == message.currentPlayerId) {
+                    // 当前玩家需要进行特殊选择
+                    _uiState.value = currentState.copy(
+                        gameRoom = message.room,
+                        needsResponse = true,
+                        responseType = ResponseType.ABUNDANT_HARVEST,
+                        errorMessage = "轮到你在${message.cardName}中进行选择！"
+                    )
+                } else {
+                    // 其他玩家等待
+                    _uiState.value = currentState.copy(
+                        gameRoom = message.room,
+                        errorMessage = "等待${message.currentPlayerName}在${message.cardName}中进行选择..."
+                    )
+                }
+            }
+            
+            is ServerMessage.CardExecutionCompleted -> {
+                val currentState = _uiState.value
+                val resultMessage = if (message.success) {
+                    if (message.blocked) "卡牌被阻挡：${message.message}" else "卡牌生效：${message.message}"
+                } else {
+                    "卡牌失败：${message.message}"
+                }
+                
+                _uiState.value = currentState.copy(
+                    gameRoom = message.room,
+                    needsResponse = false,
+                    responseType = null,
+                    errorMessage = resultMessage
+                )
+            }
         }
     }
     

@@ -13,6 +13,8 @@ import moe.gensoukyo.tbc.server.service.GameService
 import moe.gensoukyo.tbc.shared.messages.ClientMessage
 import moe.gensoukyo.tbc.shared.messages.ServerMessage
 import moe.gensoukyo.tbc.shared.messages.ServerMessage.*
+import moe.gensoukyo.tbc.shared.messages.PlayCardMessage
+import moe.gensoukyo.tbc.shared.messages.RespondToCardMessage
 import moe.gensoukyo.tbc.shared.model.Card
 import moe.gensoukyo.tbc.shared.model.CardType
 import java.util.concurrent.ConcurrentHashMap
@@ -346,8 +348,24 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 }
                             }
 
-                            is ClientMessage.PlayCardNew -> TODO()
-                            is ClientMessage.RespondToCardNew -> TODO()
+                            is ClientMessage.PlayCardNew -> {
+                                val cardExecutionHandler = CardExecutionHandler(gameService)
+                                cardExecutionHandler.handlePlayCard(
+                                    PlayCardMessage(message.playerId, message.cardId, message.targetIds),
+                                    connections,
+                                    playerSessions,
+                                    spectatorSessions
+                                )
+                            }
+                            is ClientMessage.RespondToCardNew -> {
+                                val cardExecutionHandler = CardExecutionHandler(gameService)
+                                cardExecutionHandler.handleResponse(
+                                    RespondToCardMessage(message.playerId, message.responseCardId, message.accept),
+                                    connections,
+                                    playerSessions,
+                                    spectatorSessions
+                                )
+                            }
                         }
                     } catch (e: Exception) {
                         send(Json.encodeToString<ServerMessage>(ServerMessage.Error("处理消息时发生错误: ${e.message}")))

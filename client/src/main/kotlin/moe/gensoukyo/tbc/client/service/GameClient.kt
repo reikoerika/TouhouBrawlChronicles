@@ -144,17 +144,85 @@ class GameClient {
                 println("\\n错误: ${message.message}")
             }
 
-            is ServerMessage.CardPlayed -> TODO()
-            is ServerMessage.CardResolved -> TODO()
-            is ServerMessage.CardResponseReceived -> TODO()
-            is ServerMessage.CardResponseRequired -> TODO()
-            is ServerMessage.CardsDrawn -> TODO()
-            is ServerMessage.GameStarted -> TODO()
-            is ServerMessage.InitialCardsDealt -> TODO()
-            is ServerMessage.PlayerOrderChanged -> TODO()
-            is ServerMessage.RoomList -> TODO()
-            is ServerMessage.SpectatorJoined -> TODO()
-            is ServerMessage.TurnStarted -> TODO()
+            is ServerMessage.CardPlayed -> {
+                println("\\n${message.playedCard.playerName}出了${message.playedCard.card.name}")
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.CardResolved -> {
+                println("\\n卡牌结算完成：${message.result.message}")
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.CardResponseReceived -> {
+                if (message.responseCard != null) {
+                    println("\\n${message.playerName}出了${message.responseCard.name}进行响应")
+                } else {
+                    println("\\n${message.playerName}选择${if (message.accepted) "接受" else "拒绝"}响应")
+                }
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.CardResponseRequired -> {
+                if (currentPlayer?.id == message.targetPlayerId) {
+                    println("\\n需要响应${message.originalPlayer}的${message.originalCard.name}")
+                    handleCardResponse(message.originalCard)
+                }
+            }
+            
+            is ServerMessage.CardsDrawn -> {
+                if (currentPlayer?.id == message.playerId) {
+                    println("\\n你摸了${message.cards.size}张牌")
+                    currentPlayer?.cards?.addAll(message.cards)
+                }
+            }
+            
+            is ServerMessage.GameStarted -> {
+                println("\\n游戏开始！")
+                println("房间信息：${message.room.name}")
+                println("玩家列表：")
+                message.room.players.forEach { player ->
+                    println("- ${player.name} (${player.identity.displayName}) 体力：${player.health}/${player.maxHealth}")
+                }
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.InitialCardsDealt -> {
+                if (currentPlayer?.id == message.playerId) {
+                    println("\\n获得初始手牌${message.cards.size}张")
+                    currentPlayer?.cards?.clear()
+                    currentPlayer?.cards?.addAll(message.cards)
+                }
+            }
+            
+            is ServerMessage.PlayerOrderChanged -> {
+                println("\\n玩家顺序已调整")
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.RoomList -> {
+                println("\\n可用房间：")
+                if (message.rooms.isEmpty()) {
+                    println("暂无房间")
+                } else {
+                    message.rooms.forEach { room ->
+                        println("- ${room.name} (${room.id}) 玩家：${room.players.size}/${room.maxPlayers}")
+                    }
+                }
+            }
+            
+            is ServerMessage.SpectatorJoined -> {
+                println("\\n观战者${message.spectator.name}加入了房间")
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.TurnStarted -> {
+                val player = currentRoom?.players?.find { it.id == message.playerId }
+                println("\\n${player?.name}的回合开始 - ${message.phase}")
+                if (currentPlayer?.id == message.playerId) {
+                    showGameMenu()
+                }
+            }
         }
     }
     
@@ -325,5 +393,94 @@ class GameClient {
         val playerId = currentPlayer?.id ?: return
         val message = ClientMessage.SelectAbundantHarvestCard(playerId, selectedCard.id)
         session?.send(Json.encodeToString<ClientMessage>(message))
+    }
+    
+    private suspend fun handleCardResponse(originalCard: moe.gensoukyo.tbc.shared.model.Card) {
+        val player = currentPlayer ?: return
+        
+        println("需要响应${originalCard.name}，你的手牌：")
+        player.cards.forEachIndexed { index, card ->
+            println("${index + 1}. ${card.name}")
+        }
+        println("0. 不响应")
+        
+        print("选择响应卡牌 (输入序号): ")
+        val choice = readlnOrNull()?.toIntOrNull()
+        
+        if (choice == null || choice < 0 || choice > player.cards.size) {
+            println("无效选择")
+            return
+        }
+        
+        val responseCardId = if (choice > 0) player.cards[choice - 1].id else null
+        val message = ClientMessage.RespondToCard(player.id, responseCardId, choice > 0)
+        session?.send(Json.encodeToString<ClientMessage>(message))
+    }
+    
+    private suspend fun playCard() {
+        val player = currentPlayer ?: return
+        
+        if (player.cards.isEmpty()) {
+            println("你没有卡牌可用")
+            return
+        }
+        
+        println("\\n你的手牌:")
+        player.cards.forEachIndexed { index, card ->
+            println("${index + 1}. ${card.name} - ${card.effect}")
+        }
+        
+        print("选择要使用的卡牌 (输入序号): ")
+        val choice = readlnOrNull()?.toIntOrNull()
+        
+        if (choice == null || choice < 1 || choice > player.cards.size) {
+            println("无效选择")
+            return
+        }
+        
+        val card = player.cards[choice - 1]
+        
+        // 如果是攻击卡，需要选择目标
+        val targetIds = mutableListOf<String>()
+        if (card.type == moe.gensoukyo.tbc.shared.model.CardType.BASIC) {
+            val room = currentRoom ?: return
+            val otherPlayers = room.players.filter { it.id != player.id && it.health > 0 }
+            
+            if (otherPlayers.isNotEmpty()) {
+                println("选择攻击目标:")
+                otherPlayers.forEachIndexed { index, target ->
+                    println("${index + 1}. ${target.name}")
+                }
+                
+                print("选择目标 (输入序号): ")
+                val targetChoice = readlnOrNull()?.toIntOrNull()
+                
+                if (targetChoice != null && targetChoice in 1..otherPlayers.size) {
+                    targetIds.add(otherPlayers[targetChoice - 1].id)
+                }
+            }
+        }
+        
+        val message = ClientMessage.PlayCard(player.id, card.id, targetIds)
+        session?.send(Json.encodeToString<ClientMessage>(message))
+    }
+    
+    private fun showGameStatus() {
+        val room = currentRoom ?: return
+        
+        println("\\n=== 游戏状态 ===")
+        println("房间：${room.name}")
+        println("回合数：${room.turnCount}")
+        println("当前阶段：${room.gamePhase}")
+        
+        println("\\n玩家状态：")
+        room.players.forEach { player ->
+            val status = if (player.health <= 0) "[已阵亡]" else ""
+            val current = if (room.currentPlayer?.id == player.id) "[当前回合]" else ""
+            println("- ${player.name} $status $current")
+            println("  身份：${player.identity.displayName}")
+            println("  体力：${player.health}/${player.maxHealth}")
+            println("  手牌：${player.cards.size}张")
+        }
     }
 }
