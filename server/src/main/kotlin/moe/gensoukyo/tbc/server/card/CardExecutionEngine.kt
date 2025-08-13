@@ -79,12 +79,12 @@ class CardExecutionEngine(
                 message = "${context.card.name}被无懈可击阻挡"
             )
         } else {
-            // 检查是否所有玩家都已响应
-            val alivePlayers = room.players.filter { it.health > 0 }
+            // 检查是否所有能够响应的玩家都已响应
+            val eligiblePlayers = getAllEligibleNullificationPlayers(room)
             val respondedPlayers = context.responses.map { it.playerId }.toSet()
             
-            if (alivePlayers.all { it.id in respondedPlayers }) {
-                // 所有玩家都已响应，进入结算阶段
+            if (eligiblePlayers.all { it in respondedPlayers }) {
+                // 所有能够响应的玩家都已响应，进入结算阶段
                 context.phase = CardExecutionPhase.RESOLUTION
             }
             // 如果还有玩家未响应，保持在NULLIFICATION阶段
@@ -309,5 +309,13 @@ class CardExecutionEngine(
             }
             else -> null
         }
+    }
+    
+    /**
+     * 获取所有能够响应无懈可击的玩家ID列表
+     * 目前的设计是所有存活玩家都可以响应无懈可击
+     */
+    private fun getAllEligibleNullificationPlayers(room: GameRoom): List<String> {
+        return room.players.filter { it.health > 0 }.map { it.id }
     }
 }

@@ -7,6 +7,10 @@ import moe.gensoukyo.tbc.shared.model.*
 import moe.gensoukyo.tbc.server.card.*
 import moe.gensoukyo.tbc.shared.card.CardExecutionContext
 import moe.gensoukyo.tbc.shared.card.CardExecutionPhase
+import moe.gensoukyo.tbc.shared.utils.logDebug
+import moe.gensoukyo.tbc.shared.utils.logError
+import moe.gensoukyo.tbc.shared.utils.logInfo
+import moe.gensoukyo.tbc.shared.utils.logWarn
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
@@ -236,12 +240,26 @@ class GameService {
      * 新的出牌方法 - 使用卡牌执行引擎
      */
     fun playCardNew(roomId: String, playerId: String, cardId: String, targetIds: List<String> = emptyList()): CardExecutionContext? {
-        val room = rooms[roomId] ?: return null
-        val player = room.players.find { it.id == playerId } ?: return null
+        val room = rooms[roomId] 
+        if (room == null) {
+            logDebug("Room not found: $roomId")
+            return null
+        }
+        
+        val player = room.players.find { it.id == playerId }
+        if (player == null) {
+            logDebug("Player not found: $playerId in room $roomId")
+            return null
+        }
+        
         val cardIndex = player.cards.indexOfFirst { it.id == cardId }
-        if (cardIndex == -1) return null
+        if (cardIndex == -1) {
+            logDebug("Card not found: $cardId in player ${player.name}'s hand (${player.cards.size} cards)")
+            return null
+        }
         
         val card = player.cards[cardIndex]
+        logDebug("Playing card: ${card.name} (${card.targetType}) by player ${player.name}")
         
         // 根据卡牌的目标类型自动确定目标
         val targets = when (card.targetType) {
@@ -252,9 +270,13 @@ class GameService {
                 room.players.find { it.id == targetId } 
             }
         }
+
+        logDebug("Targets determined: ${targets.map { it.name }} (${targets.size} targets)")
+        logDebug("Game state: ${room.gameState}, Game phase: ${room.gamePhase}")
         
         // 验证出牌合法性
         if (!isValidCardPlay(card, player, targets, room)) {
+            logDebug("Invalid card play detected")
             return null
         }
         
@@ -267,6 +289,7 @@ class GameService {
         // 保存执行上下文到房间
         room.activeCardExecution = context
         
+        logDebug("Card execution started successfully: ${context.id}")
         return context
     }
 
@@ -337,23 +360,48 @@ class GameService {
     
     private fun isValidCardPlay(card: Card, player: Player, targets: List<Player>, room: GameRoom): Boolean {
         // 基本验证逻辑
-        if (room.gameState != GameState.PLAYING) return false
-        if (room.gamePhase != GamePhase.PLAY) return false
+        if (room.gameState != GameState.PLAYING) {
+            logDebug("Invalid game state: ${room.gameState} (expected PLAYING)")
+            return false
+        }
+        if (room.gamePhase != GamePhase.PLAY) {
+            logDebug("Invalid game phase: ${room.gamePhase} (expected PLAY)")
+            return false
+        }
         
         // 验证目标数量和类型
-        return when (card.targetType) {
-            TargetType.NONE -> targets.isEmpty()
-            TargetType.SINGLE -> targets.size == 1
-            TargetType.MULTIPLE -> targets.isNotEmpty()
+        val result = when (card.targetType) {
+            TargetType.NONE -> {
+                val valid = targets.isEmpty()
+                if (!valid) logDebug("NONE target type requires empty targets, got ${targets.size}")
+                valid
+            }
+            TargetType.SINGLE -> {
+                val valid = targets.size == 1
+                if (!valid) logDebug("SINGLE target type requires 1 target, got ${targets.size}")
+                valid
+            }
+            TargetType.MULTIPLE -> {
+                val valid = targets.isNotEmpty()
+                if (!valid) logDebug("MULTIPLE target type requires at least 1 target, got ${targets.size}")
+                valid
+            }
             TargetType.ALL_OTHERS -> {
                 val expectedTargets = room.players.filter { it.id != player.id && it.health > 0 }
-                targets.size == expectedTargets.size
+                val valid = targets.size == expectedTargets.size
+                if (!valid) logDebug("ALL_OTHERS target type requires ${expectedTargets.size} targets, got ${targets.size}")
+                valid
             }
             TargetType.ALL_PLAYERS -> {
                 val expectedTargets = room.players.filter { it.health > 0 }
-                targets.size == expectedTargets.size
+                val valid = targets.size == expectedTargets.size
+                if (!valid) logDebug("ALL_PLAYERS target type requires ${expectedTargets.size} targets, got ${targets.size}")
+                valid
             }
         }
+        
+        logDebug("Card play validation result: $result")
+        return result
     }
     
     fun startGame(roomId: String): Pair<GameRoom, List<Pair<String, List<Card>>>>? {
@@ -417,7 +465,7 @@ class GameService {
         room.gameState = GameState.PLAYING
         room.currentPlayerIndex = 0  // 从主公开始
         room.turnCount = 1
-        room.gamePhase = GamePhase.DRAW
+        room.gamePhase = GamePhase.PLAY  // 游戏开始后直接进入出牌阶段
         
         return Pair(room, initialCards)
     }
@@ -916,8 +964,10 @@ class GameService {
         
         when (context.phase) {
             CardExecutionPhase.NULLIFICATION -> {
-                val responseCard = responseCardId?.let { cardId ->
-                    room.players.find { it.id == playerId }?.cards?.find { it.id == cardId }
+                val responseCard = if (accept && responseCardId != null) {
+                    room.players.find { it.id == playerId }?.cards?.find { it.id == responseCardId }
+                } else {
+                    null // 不响应或没有响应卡牌
                 }
                 return cardExecutionEngine.handleNullificationResponse(context.id, playerId, responseCard, room)
             }

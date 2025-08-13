@@ -557,8 +557,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     "${message.playerName}选择不响应"
                 }
+                
+                // 如果这是当前玩家的响应，关闭响应UI
+                val shouldCloseResponseUI = currentState.currentPlayer?.id == message.playerId
+                
                 _uiState.value = currentState.copy(
                     gameRoom = message.room,
+                    needsResponse = if (shouldCloseResponseUI) false else currentState.needsResponse,
+                    responseType = if (shouldCloseResponseUI) null else currentState.responseType,
                     errorMessage = responseMsg
                 )
             }
