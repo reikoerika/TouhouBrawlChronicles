@@ -8,9 +8,6 @@ import moe.gensoukyo.tbc.server.card.*
 import moe.gensoukyo.tbc.shared.card.CardExecutionContext
 import moe.gensoukyo.tbc.shared.card.CardExecutionPhase
 import moe.gensoukyo.tbc.shared.utils.logDebug
-import moe.gensoukyo.tbc.shared.utils.logError
-import moe.gensoukyo.tbc.shared.utils.logInfo
-import moe.gensoukyo.tbc.shared.utils.logWarn
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
@@ -199,39 +196,7 @@ class GameService {
         
         return player.health
     }
-    
-    fun useCard(roomId: String, playerId: String, cardId: String, targetId: String?): Boolean {
-        val room = rooms[roomId] ?: return false
-        val player = room.players.find { it.id == playerId } ?: return false
-        val cardIndex = player.cards.indexOfFirst { it.id == cardId }
-        
-        if (cardIndex == -1) return false
-        
-        val card = player.cards[cardIndex]
-        val targets = if (targetId != null) {
-            listOfNotNull(room.players.find { it.id == targetId })
-        } else {
-            emptyList()
-        }
-        
-        // 使用新的卡牌效果系统
-        val effectResult = when (card.type) {
-            CardType.BASIC -> cardEffectService.handleBasicCard(card, player, targets, room)
-            CardType.TRICK -> cardEffectService.handleTrickCard(card, player, targets, room)
-            CardType.EQUIPMENT -> cardEffectService.handleEquipmentCard(card, player, room)
-        }
-        
-        if (effectResult.success) {
-            player.cards.removeAt(cardIndex)
-            if (card.type != CardType.EQUIPMENT) {
-                room.discardPile.add(card)
-            }
-            return true
-        }
-        
-        return false
-    }
-    
+
     fun getAllRooms(): List<GameRoom> = rooms.values.toList()
     
     // ======================== 新的卡牌执行系统 ========================
@@ -239,7 +204,7 @@ class GameService {
     /**
      * 新的出牌方法 - 使用卡牌执行引擎
      */
-    fun playCardNew(roomId: String, playerId: String, cardId: String, targetIds: List<String> = emptyList()): CardExecutionContext? {
+    fun playCard(roomId: String, playerId: String, cardId: String, targetIds: List<String> = emptyList()): CardExecutionContext? {
         val room = rooms[roomId] 
         if (room == null) {
             logDebug("Room not found: $roomId")
@@ -294,34 +259,6 @@ class GameService {
     }
 
     /**
-     * 继续执行卡牌效果（用于无懈可击响应完成后）
-     */
-    fun continueCardExecution(roomId: String): CardExecutionContext? {
-        val room = rooms[roomId] ?: return null
-        val context = room.activeCardExecution ?: return null
-        
-        val updatedContext = when (context.phase) {
-            CardExecutionPhase.RESOLUTION -> {
-                cardExecutionEngine.executeCardEffect(context.id, room)
-            }
-            else -> context
-        }
-        
-        // 如果执行完成，清理状态
-        if (updatedContext?.isCompleted == true) {
-            room.activeCardExecution = null
-            cardExecutionEngine.cleanupExecution(context.id)
-            
-            // 将原始卡牌加入弃牌堆
-            if (context.card.type != CardType.EQUIPMENT) {
-                room.discardPile.add(context.card)
-            }
-        }
-        
-        return updatedContext
-    }
-    
-    /**
      * 获取当前需要响应的玩家
      */
     fun getCurrentResponseTarget(roomId: String): String? {
@@ -340,22 +277,7 @@ class GameService {
         
         return cardExecutionEngine.getAllNullificationTargets(context.id, room)
     }
-    
-    /**
-     * 获取可用的响应选项（如五谷丰登的卡牌列表）
-     */
-    fun getAvailableResponseOptions(roomId: String): List<String> {
-        val room = rooms[roomId] ?: return emptyList()
-        val context = room.activeCardExecution ?: return emptyList()
-        
-        return when (context.card.name) {
-            "五谷丰登" -> {
-                context.specialData.abundantHarvestCards.map { it.id }
-            }
-            else -> emptyList()
-        }
-    }
-    
+
     // ======================== 辅助方法 ========================
     
     private fun isValidCardPlay(card: Card, player: Player, targets: List<Player>, room: GameRoom): Boolean {
@@ -383,7 +305,7 @@ class GameService {
             }
             TargetType.MULTIPLE -> {
                 val valid = targets.isNotEmpty()
-                if (!valid) logDebug("MULTIPLE target type requires at least 1 target, got ${targets.size}")
+                if (!valid) logDebug("MULTIPLE target type requires at least 1 target, got 0")
                 valid
             }
             TargetType.ALL_OTHERS -> {
@@ -516,311 +438,7 @@ class GameService {
         
         return room
     }
-    
-    fun playCard(roomId: String, playerId: String, cardId: String, targetIds: List<String> = emptyList()): Pair<PlayedCard?, PendingResponse?>? {
-        val room = rooms[roomId] ?: return null
-        val player = room.players.find { it.id == playerId } ?: return null
-        val cardIndex = player.cards.indexOfFirst { it.id == cardId }
-        
-        if (cardIndex == -1) return null
-        if (room.gameState != GameState.PLAYING) return null
-        if (room.gamePhase != GamePhase.PLAY) return null
-        
-        val card = player.cards[cardIndex]
-        val targets = targetIds.mapNotNull { targetId -> 
-            room.players.find { it.id == targetId } 
-        }
-        
-        // 检查是否需要响应
-        val needsResponse = checkIfNeedsResponse(card, targets)
-        
-        if (needsResponse.isNotEmpty()) {
-            // 需要响应，创建待处理响应
-            val target = needsResponse.first()
-            val responseType = determineResponseType(card)
-            
-            val pendingResponse = PendingResponse(
-                targetPlayerId = target.id,
-                originalCard = card,
-                originalPlayerId = playerId,
-                responseType = responseType,
-                isDuel = card.name == "决斗",
-                duelCurrentPlayer = if (card.name == "决斗") target.id else null,
-                duelInitiator = if (card.name == "决斗") playerId else null,
-                duelTarget = if (card.name == "决斗") target.id else null,
-                isAbundantHarvest = card.name == "五谷丰登"
-            )
-            
-            room.pendingResponse = pendingResponse
-            
-            // 从手牌移除但暂不进入弃牌堆，等响应完成后处理
-            player.cards.removeAt(cardIndex)
-            
-            // 创建出牌记录
-            val playedCard = PlayedCard(
-                card = card,
-                playerId = playerId,
-                playerName = player.name,
-                turnNumber = room.turnCount,
-                targetIds = targetIds
-            )
-            
-            return Pair(playedCard, pendingResponse)
-        } else {
-            // 不需要响应，直接处理效果
-            return handleCardDirectly(room, player, cardIndex, card, targets, targetIds)
-        }
-    }
-    
-    private fun checkIfNeedsResponse(card: Card, targets: List<Player>): List<Player> {
-        return when (card.name) {
-            "杀" -> targets // 杀需要目标响应闪
-            "决斗" -> targets // 决斗是基本牌，需要目标响应杀或闪
-            else -> when (card.type) {
-                CardType.TRICK -> targets // 锦囊牌（包括五谷丰登）可能需要无懈可击
-                else -> emptyList()
-            }
-        }
-    }
-    
-    private fun determineResponseType(card: Card): ResponseType {
-        return when (card.name) {
-            "杀" -> ResponseType.DODGE  // 杀只能用闪响应
-            "决斗" -> ResponseType.DUEL_KILL  // 决斗需要用杀响应
-            else -> when (card.type) {
-                CardType.TRICK -> ResponseType.NULLIFICATION  // 锦囊牌用无懈可击响应
-                else -> ResponseType.OPTIONAL
-            }
-        }
-    }
-    
-    private fun handleCardDirectly(
-        room: GameRoom, 
-        player: Player, 
-        cardIndex: Int, 
-        card: Card, 
-        targets: List<Player>, 
-        targetIds: List<String>
-    ): Pair<PlayedCard?, PendingResponse?> {
-        // 处理卡牌效果
-        val effectResult = when (card.type) {
-            CardType.BASIC -> cardEffectService.handleBasicCard(card, player, targets, room)
-            CardType.TRICK -> cardEffectService.handleTrickCard(card, player, targets, room)
-            CardType.EQUIPMENT -> cardEffectService.handleEquipmentCard(card, player, room)
-        }
-        
-        if (!effectResult.success) {
-            return Pair(null, null)
-        }
-        
-        
-        // 从手牌中移除
-        player.cards.removeAt(cardIndex)
-        
-        // 装备牌不进入弃牌堆，其他牌进入弃牌堆
-        if (card.type != CardType.EQUIPMENT) {
-            room.discardPile.add(card)
-        }
-        
-        // 处理摸牌效果
-        if (effectResult.drawCards > 0) {
-            if (effectResult.affectAllPlayers) {
-                room.players.forEach { p ->
-                    drawCard(room.id, p.id, effectResult.drawCards)
-                }
-            } else {
-                drawCard(room.id, player.id, effectResult.drawCards)
-            }
-        }
-        
-        // 创建出牌记录
-        val playedCard = PlayedCard(
-            card = card,
-            playerId = player.id,
-            playerName = player.name,
-            turnNumber = room.turnCount,
-            targetIds = targetIds
-        )
-        
-        // 添加到玩家的出牌记录
-        player.playedCards.add(playedCard)
-        
-        // 添加到当前回合的出牌区
-        room.currentTurnPlayedCards.add(playedCard)
-        
-        return Pair(playedCard, null)
-    }
-    
-    private fun handleAbundantHarvest(room: GameRoom, player: Player, cardIndex: Int, card: Card): Pair<PlayedCard?, PendingResponse?> {
-        // 从手牌中移除五谷丰登
-        player.cards.removeAt(cardIndex)
-        
-        // 从牌堆顶抽取等同于存活玩家数量的牌
-        val alivePlayers = room.players.filter { it.health > 0 }
-        val availableCards = mutableListOf<Card>()
-        
-        repeat(alivePlayers.size) {
-            if (room.deck.isEmpty() && room.discardPile.isNotEmpty()) {
-                // 重新洗牌
-                room.deck.addAll(room.discardPile.shuffled())
-                room.discardPile.clear()
-            }
-            
-            if (room.deck.isNotEmpty()) {
-                availableCards.add(room.deck.removeAt(0))
-            }
-        }
-        
-        // 创建五谷丰登的PendingResponse
-        val pendingResponse = PendingResponse(
-            targetPlayerId = alivePlayers.first().id,
-            originalCard = card,
-            originalPlayerId = player.id,
-            responseType = ResponseType.ABUNDANT_HARVEST,
-            isAbundantHarvest = true,
-            availableCards = availableCards,
-            currentSelectionPlayerIndex = 0
-        )
-        
-        room.pendingResponse = pendingResponse
-        
-        // 创建出牌记录
-        val playedCard = PlayedCard(
-            card = card,
-            playerId = player.id,
-            playerName = player.name,
-            turnNumber = room.turnCount,
-            targetIds = alivePlayers.map { it.id }
-        )
-        
-        return Pair(playedCard, pendingResponse)
-    }
-    
-    fun respondToCard(roomId: String, playerId: String, responseCardId: String?, accept: Boolean): CardResolutionResult? {
-        val room = rooms[roomId] ?: return null
-        val pendingResponse = room.pendingResponse ?: return null
-        val respondingPlayer = room.players.find { it.id == playerId } ?: return null
-        
-        // 验证是否是正确的响应者
-        if (playerId != pendingResponse.targetPlayerId && (!pendingResponse.isDuel || playerId != pendingResponse.duelCurrentPlayer)) {
-            return null
-        }
-        
-        var responseCard: Card? = null
-        if (responseCardId != null) {
-            val cardIndex = respondingPlayer.cards.indexOfFirst { it.id == responseCardId }
-            if (cardIndex != -1) {
-                responseCard = respondingPlayer.cards[cardIndex]
-                // 验证响应卡牌是否有效
-                if (isValidResponse(responseCard, pendingResponse.responseType)) {
-                    respondingPlayer.cards.removeAt(cardIndex)
-                    room.discardPile.add(responseCard)
-                }
-            }
-        }
-        
-        // 记录响应
-        val cardResponse = CardResponse(
-            playerId = playerId,
-            playerName = respondingPlayer.name,
-            responseCard = responseCard,
-            accepted = accept && responseCard != null
-        )
-        
-        pendingResponse.responses.add(cardResponse)
-        
-        // 处理决斗的特殊逻辑
-        if (pendingResponse.isDuel) {
-            return handleDuelResponse(room, pendingResponse, cardResponse)
-        } else {
-            // 普通卡牌响应，解析最终结果
-            val result = resolveCardEffect(room, pendingResponse, cardResponse)
-            
-            // 清除待处理响应
-            room.pendingResponse = null
-            
-            // 将原始卡牌加入弃牌堆（如果不是装备）
-            if (pendingResponse.originalCard.type != CardType.EQUIPMENT) {
-                room.discardPile.add(pendingResponse.originalCard)
-            }
-            
-            return result
-        }
-    }
-    
-    private fun handleDuelResponse(room: GameRoom, pendingResponse: PendingResponse, response: CardResponse): CardResolutionResult? {
-        val duelInitiator = room.players.find { it.id == pendingResponse.duelInitiator!! }
-        val duelTarget = room.players.find { it.id == pendingResponse.duelTarget!! }
-        
-        if (duelInitiator == null || duelTarget == null) {
-            return CardResolutionResult(success = false, message = "决斗参与者不存在")
-        }
-        
-        if (response.accepted && response.responseCard?.name == "杀") {
-            // 成功出杀，增加计数并切换到另一方
-            pendingResponse.duelKillCount++
-            
-            // 切换当前出杀的玩家
-            pendingResponse.duelCurrentPlayer = if (pendingResponse.duelCurrentPlayer == duelTarget.id) {
-                pendingResponse.duelInitiator
-            } else {
-                pendingResponse.duelTarget
-            }
-            
-            // 更新targetPlayerId为当前需要出杀的玩家
-            pendingResponse.targetPlayerId = pendingResponse.duelCurrentPlayer!!
-            
-            // 返回继续决斗的结果
-            val currentPlayerName = room.players.find { it.id == pendingResponse.duelCurrentPlayer }?.name ?: "未知"
-            return CardResolutionResult(
-                success = true,
-                blocked = false,
-                message = "${response.playerName}出了杀，轮到${currentPlayerName}出杀"
-            )
-        } else {
-            // 没有出杀或拒绝出杀，决斗结束
-            pendingResponse.duelFinished = true
-            
-            // 不出杀的一方受到1点伤害
-            val loserPlayer = room.players.find { it.id == response.playerId }!!
-            loserPlayer.health = maxOf(0, loserPlayer.health - 1)
-            
-            val winnerPlayer = room.players.find {
-                it.id != response.playerId && (it.id == pendingResponse.duelInitiator || it.id == pendingResponse.duelTarget) 
-            }!!
-            
-            // 清除待处理响应
-            room.pendingResponse = null
-            
-            // 将决斗卡牌加入弃牌堆
-            room.discardPile.add(pendingResponse.originalCard)
-            
-            // 检查玩家是否死亡
-            val gameResult = if (loserPlayer.health <= 0) {
-                "决斗结束，${loserPlayer.name}没有出杀，受到1点伤害并死亡"
-            } else {
-                "决斗结束，${loserPlayer.name}没有出杀，受到1点伤害"
-            }
-            
-            return CardResolutionResult(
-                success = true,
-                blocked = false,
-                damage = 1,
-                message = gameResult
-            )
-        }
-    }
-    
-    private fun isValidResponse(responseCard: Card, responseType: ResponseType): Boolean {
-        return when (responseType) {
-            ResponseType.DODGE -> responseCard.name == "闪"
-            ResponseType.NULLIFICATION -> responseCard.name == "无懈可击"
-            ResponseType.DUEL_KILL -> responseCard.name == "杀"
-            ResponseType.ABUNDANT_HARVEST -> true // 五谷丰登选择任何可用卡牌都有效
-            ResponseType.OPTIONAL -> true
-        }
-    }
-    
+
     fun selectAbundantHarvestCard(roomId: String, playerId: String, selectedCardId: String): Card? {
         val room = rooms[roomId] ?: return null
         val pendingResponse = room.pendingResponse ?: return null
@@ -871,88 +489,7 @@ class GameService {
         
         return selectedCard
     }
-    
-    private fun startAbundantHarvestSelection(room: GameRoom, originalPlayer: Player) {
-        val originalCard = Card("五谷丰登", "所有玩家依次选择获得一张牌", CardType.TRICK, "五谷丰登")
-        
-        // 从牌堆顶抽取等同于存活玩家数量的牌
-        val alivePlayers = room.players.filter { it.health > 0 }
-        val availableCards = mutableListOf<Card>()
-        
-        repeat(alivePlayers.size) {
-            if (room.deck.isEmpty() && room.discardPile.isNotEmpty()) {
-                // 重新洗牌
-                room.deck.addAll(room.discardPile.shuffled())
-                room.discardPile.clear()
-            }
-            
-            if (room.deck.isNotEmpty()) {
-                availableCards.add(room.deck.removeAt(0))
-            }
-        }
-        
-        // 创建五谷丰登的PendingResponse
-        val pendingResponse = PendingResponse(
-            targetPlayerId = alivePlayers.first().id,
-            originalCard = originalCard,
-            originalPlayerId = originalPlayer.id,
-            responseType = ResponseType.ABUNDANT_HARVEST,
-            isAbundantHarvest = true,
-            availableCards = availableCards,
-            currentSelectionPlayerIndex = 0
-        )
-        
-        room.pendingResponse = pendingResponse
-    }
-    
-    private fun resolveCardEffect(room: GameRoom, pendingResponse: PendingResponse, response: CardResponse): CardResolutionResult {
-        val originalCard = pendingResponse.originalCard
-        val targets = listOfNotNull(room.players.find { it.id == pendingResponse.targetPlayerId })
-        val originalPlayer = room.players.find { it.id == pendingResponse.originalPlayerId }
-        
-        return when {
-            response.accepted && response.responseCard != null -> {
-                // 响应成功，卡牌效果被阻挡
-                CardResolutionResult(
-                    success = false,
-                    blocked = true,
-                    message = "${response.playerName}使用${response.responseCard!!.name}成功阻挡了${originalCard.name}"
-                )
-            }
-            else -> {
-                // 没有响应或响应失败，执行原始效果
-                if (originalPlayer != null) {
-                    val effectResult = when (originalCard.type) {
-                        CardType.BASIC -> cardEffectService.handleBasicCard(originalCard, originalPlayer, targets, room)
-                        CardType.TRICK -> cardEffectService.handleTrickCard(originalCard, originalPlayer, targets, room)
-                        CardType.EQUIPMENT -> cardEffectService.handleEquipmentCard(originalCard, originalPlayer, room)
-                    }
-                    
-                    // 检查是否是五谷丰登且需要特殊处理
-                    if (effectResult.requiresSpecialHandling && originalCard.name == "五谷丰登") {
-                        // 启动五谷丰登选牌流程
-                        startAbundantHarvestSelection(room, originalPlayer)
-                        return CardResolutionResult(
-                            success = true,
-                            blocked = false,
-                            message = "${originalCard.name}开始，玩家依次选择卡牌"
-                        )
-                    }
-                    
-                    CardResolutionResult(
-                        success = effectResult.success,
-                        blocked = false,
-                        damage = if (originalCard.damage > 0) originalCard.damage else 0,
-                        healing = if (originalCard.healing > 0) originalCard.healing else 0,
-                        message = "${originalCard.name}生效"
-                    )
-                } else {
-                    CardResolutionResult(success = false, message = "原始玩家不存在")
-                }
-            }
-        }
-    }
-    
+
     // ======================== 新系统相关方法 ========================
     
     /**
@@ -997,13 +534,5 @@ class GameService {
         cardExecutionEngine.cleanupExecution(executionId)
         rooms[roomId]?.activeCardExecution = null
     }
-    
-    /**
-     * 获取玩家的WebSocket会话ID
-     */
-    fun getPlayerSession(playerId: String): String? {
-        // 这里需要实现玩家到会话ID的映射
-        // 暂时返回null，需要在WebSocket层面实现
-        return null
-    }
+
 }

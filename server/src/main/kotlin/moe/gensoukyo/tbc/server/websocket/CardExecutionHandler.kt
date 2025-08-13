@@ -53,7 +53,7 @@ class CardExecutionHandler(
 
             logInfo("Starting card execution for player ${message.playerId} in room $roomId")
 
-            val context = gameService.playCardNew(roomId, message.playerId, message.cardId, message.targetIds)
+            val context = gameService.playCard(roomId, message.playerId, message.cardId, message.targetIds)
                 ?: return Result.failure(IllegalStateException("Failed to start card execution"))
 
             // 更新WebSocket连接映射
