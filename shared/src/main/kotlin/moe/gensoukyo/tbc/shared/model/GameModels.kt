@@ -179,6 +179,7 @@ enum class ResponseType {
     DODGE,          // 闪避（对杀的响应）
     NULLIFICATION,  // 无懈可击（对锦囊的响应）
     DUEL_KILL,      // 决斗中出杀（决斗特有）
+    ABUNDANT_HARVEST, // 五谷丰登选择卡牌
     OPTIONAL        // 可选响应
 }
 
@@ -215,5 +216,10 @@ data class PendingResponse(
     var duelKillCount: Int = 0,  // 已经出的杀的数量
     var duelInitiator: String? = null,  // 决斗发起者
     var duelTarget: String? = null,  // 决斗目标
-    var duelFinished: Boolean = false  // 决斗是否结束
+    var duelFinished: Boolean = false,  // 决斗是否结束
+    // 五谷丰登专用字段
+    var isAbundantHarvest: Boolean = false,  // 是否是五谷丰登
+    var availableCards: MutableList<Card> = mutableListOf(),  // 可选择的卡牌
+    var currentSelectionPlayerIndex: Int = 0,  // 当前选择玩家的索引
+    var selectedCards: MutableMap<String, String> = mutableMapOf()  // 玩家ID到卡牌ID的映射
 )

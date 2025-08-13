@@ -44,6 +44,9 @@ sealed class ClientMessage {
     
     @Serializable
     data class RespondToCard(val playerId: String, val responseCardId: String?, val accept: Boolean = false) : ClientMessage()
+    
+    @Serializable
+    data class SelectAbundantHarvestCard(val playerId: String, val selectedCardId: String) : ClientMessage()
 }
 
 @Serializable
@@ -112,6 +115,36 @@ sealed class ServerMessage {
         val originalCard: Card,
         val responses: List<CardResponse>,
         val result: CardResolutionResult,
+        val room: GameRoom
+    ) : ServerMessage()
+    
+    @Serializable
+    data class AbundantHarvestStarted(
+        val availableCards: List<Card>,
+        val currentPlayerIndex: Int,
+        val room: GameRoom
+    ) : ServerMessage()
+    
+    @Serializable
+    data class AbundantHarvestSelection(
+        val playerId: String,
+        val playerName: String,
+        val availableCards: List<Card>,
+        val room: GameRoom
+    ) : ServerMessage()
+    
+    @Serializable
+    data class AbundantHarvestCardSelected(
+        val playerId: String,
+        val playerName: String,
+        val selectedCard: Card,
+        val remainingCards: List<Card>,
+        val room: GameRoom
+    ) : ServerMessage()
+    
+    @Serializable
+    data class AbundantHarvestCompleted(
+        val selections: Map<String, Card>,
         val room: GameRoom
     ) : ServerMessage()
 }
