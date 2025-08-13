@@ -356,8 +356,7 @@ class GameService {
         
         return when (context.card.name) {
             "五谷丰登" -> {
-                val availableCards = context.specialData["availableCards"] as? List<Card>
-                availableCards?.map { it.id } ?: emptyList()
+                context.specialData.abundantHarvestCards.map { it.id }
             }
             else -> emptyList()
         }

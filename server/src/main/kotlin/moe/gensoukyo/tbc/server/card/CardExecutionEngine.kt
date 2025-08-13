@@ -232,10 +232,10 @@ class CardExecutionEngine(
             }
         }
         
-        context.specialData = mapOf(
-            "availableCards" to availableCards,
-            "currentPlayerIndex" to 0,
-            "playerOrder" to alivePlayers.map { it.id }
+        context.specialData = context.specialData.copy(
+            abundantHarvestCards = availableCards,
+            abundantHarvestPlayerOrder = alivePlayers.map { it.id },
+            abundantHarvestCurrentIndex = 0
         )
     }
     
@@ -245,9 +245,9 @@ class CardExecutionEngine(
         selectedCardId: String,
         room: GameRoom
     ) {
-        val availableCards = context.specialData["availableCards"] as? MutableList<Card> ?: return
-        val currentIndex = context.specialData["currentPlayerIndex"] as? Int ?: return
-        val playerOrder = context.specialData["playerOrder"] as? List<String> ?: return
+        val availableCards = context.specialData.abundantHarvestCards.toMutableList()
+        val currentIndex = context.specialData.abundantHarvestCurrentIndex
+        val playerOrder = context.specialData.abundantHarvestPlayerOrder
         
         // 验证是否是当前玩家
         if (currentIndex >= playerOrder.size || playerOrder[currentIndex] != playerId) return
@@ -262,10 +262,10 @@ class CardExecutionEngine(
         
         // 更新索引
         val nextIndex = currentIndex + 1
-        context.specialData = context.specialData.toMutableMap().apply {
-            put("currentPlayerIndex", nextIndex)
-            put("availableCards", availableCards)
-        }
+        context.specialData = context.specialData.copy(
+            abundantHarvestCards = availableCards,
+            abundantHarvestCurrentIndex = nextIndex
+        )
         
         // 检查是否完成
         if (nextIndex >= playerOrder.size) {
@@ -282,8 +282,8 @@ class CardExecutionEngine(
     private fun getSpecialResponseTarget(context: CardExecutionContext): String? {
         return when (context.card.name) {
             "五谷丰登" -> {
-                val currentIndex = context.specialData["currentPlayerIndex"] as? Int ?: return null
-                val playerOrder = context.specialData["playerOrder"] as? List<String> ?: return null
+                val currentIndex = context.specialData.abundantHarvestCurrentIndex
+                val playerOrder = context.specialData.abundantHarvestPlayerOrder
                 if (currentIndex < playerOrder.size) playerOrder[currentIndex] else null
             }
             else -> null

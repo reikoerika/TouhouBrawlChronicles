@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -n \"fun \" /mnt/f/python/TouhouBrawlChronicles/server/src/main/kotlin/moe/gensoukyo/tbc/server/service/GameService.kt)"
+      "Bash(grep -n \"fun \" /mnt/f/python/TouhouBrawlChronicles/server/src/main/kotlin/moe/gensoukyo/tbc/server/service/GameService.kt)",
+      "Bash(rm /mnt/f/python/TouhouBrawlChronicles/server/src/main/kotlin/moe/gensoukyo/tbc/server/card/CardExecution.kt)",
+      "Bash(grep -r \"moe.gensoukyo.tbc.server.card.CardExecutionContext\" /mnt/f/python/TouhouBrawlChronicles/)",
+      "Bash(grep -r \"import.*CardExecutionContext\" /mnt/f/python/TouhouBrawlChronicles/server/src/ /mnt/f/python/TouhouBrawlChronicles/shared/src/)"
     ],
     "deny": [],
     "ask": []

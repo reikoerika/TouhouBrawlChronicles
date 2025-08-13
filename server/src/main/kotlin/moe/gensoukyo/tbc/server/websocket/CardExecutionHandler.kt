@@ -194,8 +194,7 @@ class CardExecutionHandler(
         // 获取可用选项
         val availableOptions = when (context.card.name) {
             "五谷丰登" -> {
-                val availableCards = context.specialData["availableCards"] as? List<Card> ?: emptyList()
-                availableCards.map { card ->
+                context.specialData.abundantHarvestCards.map { card ->
                     ResponseOption(
                         id = card.id,
                         name = card.name,
