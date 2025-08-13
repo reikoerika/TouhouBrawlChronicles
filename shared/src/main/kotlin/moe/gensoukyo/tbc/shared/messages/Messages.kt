@@ -212,4 +212,3 @@ data class ResponseOption(
     val name: String,
     val description: String
 )
-}

@@ -45,14 +45,6 @@ data class ResponseRequiredMessage(
     val timeoutMs: Long = 15000,
     val availableOptions: List<ResponseOption> = emptyList()
 )
-
-@Serializable
-data class ResponseOption(
-    val id: String,
-    val name: String,
-    val description: String
-)
-
 @Serializable
 data class ResponseReceivedMessage(
     val executionId: String,

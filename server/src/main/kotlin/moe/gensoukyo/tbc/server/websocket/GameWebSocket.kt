@@ -12,6 +12,7 @@ import kotlinx.serialization.json.Json
 import moe.gensoukyo.tbc.server.service.GameService
 import moe.gensoukyo.tbc.shared.messages.ClientMessage
 import moe.gensoukyo.tbc.shared.messages.ServerMessage
+import moe.gensoukyo.tbc.shared.messages.ServerMessage.*
 import moe.gensoukyo.tbc.shared.model.Card
 import moe.gensoukyo.tbc.shared.model.CardType
 import java.util.concurrent.ConcurrentHashMap
@@ -39,7 +40,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 val player = room.players.first()
                                 playerSessions[player.id] = sessionId
                                 
-                                send(Json.encodeToString<ServerMessage>(ServerMessage.RoomCreated(room)))
+                                send(Json.encodeToString<ServerMessage>(RoomCreated(room)))
                             }
                             
                             is ClientMessage.JoinRoom -> {
@@ -50,25 +51,25 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     if (player != null) {
                                         // 玩家加入或重连
                                         playerSessions[player.id] = sessionId
-                                        send(Json.encodeToString<ServerMessage>(ServerMessage.PlayerJoined(player, room)))
+                                        send(Json.encodeToString<ServerMessage>(PlayerJoined(player, room)))
                                     } else if (spectator != null) {
                                         // 观战者加入或重连
                                         spectatorSessions[spectator.id] = sessionId
-                                        send(Json.encodeToString<ServerMessage>(ServerMessage.SpectatorJoined(spectator, room)))
+                                        send(Json.encodeToString<ServerMessage>(SpectatorJoined(spectator, room)))
                                     }
                                     
                                     // 通知房间内所有人
                                     broadcastToRoom(connections, playerSessions, spectatorSessions, room.id, room, gameService) {
-                                        ServerMessage.GameStateUpdate(room)
+                                        GameStateUpdate(room)
                                     }
                                 } else {
-                                    send(Json.encodeToString<ServerMessage>(ServerMessage.Error("无法加入房间")))
+                                    send(Json.encodeToString<ServerMessage>(Error("无法加入房间")))
                                 }
                             }
                             
                             is ClientMessage.GetRoomList -> {
                                 val rooms = gameService.getAllRooms()
-                                send(Json.encodeToString<ServerMessage>(ServerMessage.RoomList(rooms)))
+                                send(Json.encodeToString<ServerMessage>(RoomList(rooms)))
                             }
                             
                             is ClientMessage.DrawCard -> {
@@ -78,7 +79,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 if (roomId != null) {
                                     val cards = gameService.drawCard(roomId, playerId, 1)
                                     if (cards.isNotEmpty()) {
-                                        send(Json.encodeToString<ServerMessage>(ServerMessage.CardsDrawn(playerId, cards)))
+                                        send(Json.encodeToString<ServerMessage>(CardsDrawn(playerId, cards)))
                                     }
                                 }
                             }
@@ -91,7 +92,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     val newHealth = gameService.updatePlayerHealth(roomId, playerId, message.amount)
                                     if (newHealth != null) {
                                         broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, gameService.getRoom(roomId)!!, gameService) {
-                                            ServerMessage.HealthUpdated(playerId, newHealth)
+                                            HealthUpdated(playerId, newHealth)
                                         }
                                     }
                                 }
@@ -106,7 +107,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     if (success) {
                                         val room = gameService.getRoom(roomId)!!
                                         broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                            ServerMessage.GameStateUpdate(room)
+                                            GameStateUpdate(room)
                                         }
                                     }
                                 }
@@ -119,7 +120,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     
                                     // 首先广播游戏开始消息
                                     broadcastToRoom(connections, playerSessions, spectatorSessions, message.roomId, room, gameService) {
-                                        ServerMessage.GameStarted(room)
+                                        GameStarted(room)
                                     }
                                     
                                     // 然后向每个玩家发送他们的初始手牌
@@ -128,7 +129,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                         val session = connections[sessionId]
                                         session?.send(
                                             Json.encodeToString<ServerMessage>(
-                                                ServerMessage.InitialCardsDealt(playerId, cards)
+                                                InitialCardsDealt(playerId, cards)
                                             )
                                         )
                                     }
@@ -139,7 +140,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                         val currentPlayerSession = connections[currentPlayerSessionId]
                                         currentPlayerSession?.send(
                                             Json.encodeToString<ServerMessage>(
-                                                ServerMessage.TurnStarted(currentPlayer.id, room.gamePhase)
+                                                TurnStarted(currentPlayer.id, room.gamePhase)
                                             )
                                         )
                                     }
@@ -154,7 +155,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     val room = gameService.nextTurn(roomId)
                                     if (room != null) {
                                         broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                            ServerMessage.GameStateUpdate(room)
+                                            GameStateUpdate(room)
                                         }
                                         
                                         // 通知当前玩家开始回合
@@ -163,7 +164,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                             val currentPlayerSession = connections[currentPlayerSessionId]
                                             currentPlayerSession?.send(
                                                 Json.encodeToString<ServerMessage>(
-                                                    ServerMessage.TurnStarted(currentPlayer.id, room.gamePhase)
+                                                    TurnStarted(currentPlayer.id, room.gamePhase)
                                                 )
                                             )
                                         }
@@ -175,7 +176,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 val room = gameService.adjustPlayerOrder(message.roomId, message.newOrder)
                                 if (room != null) {
                                     broadcastToRoom(connections, playerSessions, spectatorSessions, message.roomId, room, gameService) {
-                                        ServerMessage.PlayerOrderChanged(room)
+                                        PlayerOrderChanged(room)
                                     }
                                 }
                             }
@@ -193,13 +194,13 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     // 五谷丰登特殊处理
                                     if (playedCard != null) {
                                         broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                            ServerMessage.CardPlayed(playedCard, room)
+                                            CardPlayed(playedCard, room)
                                         }
                                     }
 
                                     // 广播五谷丰登开始
                                     broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                        ServerMessage.AbundantHarvestStarted(
+                                        AbundantHarvestStarted(
                                             availableCards = pendingResponse.availableCards,
                                             currentPlayerIndex = pendingResponse.currentSelectionPlayerIndex,
                                             room = room
@@ -211,7 +212,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     val firstPlayerSession = connections[firstPlayerSessionId]
                                     firstPlayerSession?.send(
                                         Json.encodeToString<ServerMessage>(
-                                            ServerMessage.AbundantHarvestSelection(
+                                            AbundantHarvestSelection(
                                                 playerId = pendingResponse.targetPlayerId,
                                                 playerName = room.players.find { it.id == pendingResponse.targetPlayerId }?.name ?: "未知",
                                                 availableCards = pendingResponse.availableCards,
@@ -223,7 +224,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     // 其他需要响应的卡牌处理
                                     if (playedCard != null) {
                                         broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                            ServerMessage.CardPlayed(playedCard, room)
+                                            CardPlayed(playedCard, room)
                                         }
                                     }
 
@@ -232,7 +233,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     val targetSession = connections[targetSessionId]
                                     targetSession?.send(
                                         Json.encodeToString<ServerMessage>(
-                                            ServerMessage.CardResponseRequired(
+                                            CardResponseRequired(
                                                 targetPlayerId = pendingResponse.targetPlayerId,
                                                 originalCard = pendingResponse.originalCard,
                                                 originalPlayer = room.players.find { it.id == pendingResponse.originalPlayerId }?.name ?: "未知",
@@ -255,7 +256,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                         val pendingResponse = room.pendingResponse
                                         // 广播选择结果
                                         broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                            ServerMessage.AbundantHarvestCardSelected(
+                                            AbundantHarvestCardSelected(
                                                 playerId = playerId,
                                                 playerName = room.players.find { it.id == playerId }?.name ?: "未知",
                                                 selectedCard = selectedCard,
@@ -267,7 +268,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                         if (pendingResponse == null) {
                                             // 五谷丰登完成
                                             broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                                ServerMessage.AbundantHarvestCompleted(
+                                                AbundantHarvestCompleted(
                                                     selections = room.lastAbundantHarvestSelections,
                                                     room = room
                                                 )
@@ -278,7 +279,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                             val nextPlayerSession = connections[nextPlayerSessionId]
                                             nextPlayerSession?.send(
                                                 Json.encodeToString<ServerMessage>(
-                                                    ServerMessage.AbundantHarvestSelection(
+                                                    AbundantHarvestSelection(
                                                         playerId = pendingResponse.targetPlayerId,
                                                         playerName = room.players.find { it.id == pendingResponse.targetPlayerId }?.name ?: "未知",
                                                         availableCards = pendingResponse.availableCards,
@@ -311,7 +312,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                             
                                             nextPlayerSession?.send(
                                                 Json.encodeToString<ServerMessage>(
-                                                    ServerMessage.CardResponseRequired(
+                                                    CardResponseRequired(
                                                         targetPlayerId = pendingResponse.duelCurrentPlayer!!,
                                                         originalCard = pendingResponse.originalCard,
                                                         originalPlayer = room.players.find { it.id == pendingResponse.duelInitiator }?.name ?: "未知",
@@ -323,7 +324,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                             
                                             // 广播中间结果给所有人
                                             broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                                ServerMessage.CardResponseReceived(
+                                                CardResponseReceived(
                                                     playerId = playerId,
                                                     responseCard = null,
                                                     accepted = message.accept,
@@ -333,7 +334,7 @@ fun Route.gameWebSocket(gameService: GameService) {
                                         } else {
                                             // 决斗结束或其他响应完成，广播最终结果
                                             broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                                ServerMessage.CardResolved(
+                                                CardResolved(
                                                     originalCard = Card("", "决斗", CardType.TRICK, ""),
                                                     responses = emptyList(),
                                                     result = result,
@@ -344,6 +345,9 @@ fun Route.gameWebSocket(gameService: GameService) {
                                     }
                                 }
                             }
+
+                            is ClientMessage.PlayCardNew -> TODO()
+                            is ClientMessage.RespondToCardNew -> TODO()
                         }
                     } catch (e: Exception) {
                         send(Json.encodeToString<ServerMessage>(ServerMessage.Error("处理消息时发生错误: ${e.message}")))

@@ -2,6 +2,11 @@ package moe.gensoukyo.tbc.server.card
 
 import moe.gensoukyo.tbc.shared.model.*
 import moe.gensoukyo.tbc.server.service.CardEffectService
+import moe.gensoukyo.tbc.shared.card.CardExecutionContext
+import moe.gensoukyo.tbc.shared.card.CardExecutionPhase
+import moe.gensoukyo.tbc.shared.card.CardExecutionResult
+import moe.gensoukyo.tbc.shared.card.CardResponse
+import moe.gensoukyo.tbc.shared.card.CardResponseType
 import java.util.*
 
 /**

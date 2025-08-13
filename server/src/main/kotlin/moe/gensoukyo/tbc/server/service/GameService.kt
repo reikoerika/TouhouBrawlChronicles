@@ -5,6 +5,8 @@ import kotlinx.coroutines.sync.withLock
 import moe.gensoukyo.tbc.shared.card.CardFactory
 import moe.gensoukyo.tbc.shared.model.*
 import moe.gensoukyo.tbc.server.card.*
+import moe.gensoukyo.tbc.shared.card.CardExecutionContext
+import moe.gensoukyo.tbc.shared.card.CardExecutionPhase
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max

@@ -1,6 +1,7 @@
 package moe.gensoukyo.tbc.shared.model
 
 import kotlinx.serialization.Serializable
+import moe.gensoukyo.tbc.shared.card.CardExecutionContext
 
 @Serializable
 data class Player(
@@ -156,7 +157,7 @@ data class GameRoom(
     var pendingResponse: PendingResponse? = null,  // 待处理的卡牌响应（旧系统）
     var lastAbundantHarvestSelections: Map<String, Card> = emptyMap(),  // 上次五谷丰登的选择记录
     @kotlinx.serialization.Transient
-    var activeCardExecution: moe.gensoukyo.tbc.server.card.CardExecutionContext? = null  // 当前卡牌执行上下文（新系统）
+    var activeCardExecution: CardExecutionContext? = null  // 当前卡牌执行上下文（新系统）
 ) {
     val currentPlayer: Player?
         get() = if (players.isNotEmpty() && currentPlayerIndex < players.size) 

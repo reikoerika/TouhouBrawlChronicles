@@ -6,6 +6,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import moe.gensoukyo.tbc.server.card.*
 import moe.gensoukyo.tbc.server.service.GameService
+import moe.gensoukyo.tbc.shared.card.CardExecutionContext
+import moe.gensoukyo.tbc.shared.card.CardExecutionPhase
 import moe.gensoukyo.tbc.shared.messages.*
 import moe.gensoukyo.tbc.shared.model.Card
 
