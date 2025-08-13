@@ -268,8 +268,26 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             is ServerMessage.GameStarted -> {
                 _uiState.value = _uiState.value.copy(
                     gameRoom = message.room,
-                    errorMessage = null
+                    errorMessage = "游戏开始！开始分发初始手牌..."
                 )
+            }
+            
+            is ServerMessage.InitialCardsDealt -> {
+                val currentState = _uiState.value
+                if (currentState.currentPlayer?.id == message.playerId) {
+                    // 更新当前玩家的手牌
+                    val updatedPlayer = currentState.currentPlayer.copy(
+                        cards = message.cards.toMutableList()
+                    )
+                    val cardCountMessage = when (updatedPlayer.identity) {
+                        moe.gensoukyo.tbc.shared.model.Identity.LORD -> "主公获得初始手牌 ${message.cards.size} 张！"
+                        else -> "获得初始手牌 ${message.cards.size} 张！"
+                    }
+                    _uiState.value = currentState.copy(
+                        currentPlayer = updatedPlayer,
+                        errorMessage = cardCountMessage
+                    )
+                }
             }
             
             is ServerMessage.TurnStarted -> {

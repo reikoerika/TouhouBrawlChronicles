@@ -73,6 +73,9 @@ sealed class ServerMessage {
     data class GameStarted(val room: GameRoom) : ServerMessage()
     
     @Serializable
+    data class InitialCardsDealt(val playerId: String, val cards: List<Card>) : ServerMessage()
+    
+    @Serializable
     data class PlayerOrderChanged(val room: GameRoom) : ServerMessage()
     
     @Serializable

@@ -22,8 +22,8 @@ class GameService {
             id = playerId,
             name = playerName,
             health = 4,  // 默认4血
-            maxHealth = 4,
-            identity = Identity.LORD  // 房主默认为主公
+            maxHealth = 4
+            // 不在这里设置身份，等游戏开始时统一分配
         )
         
         val room = GameRoom(
@@ -94,35 +94,44 @@ class GameService {
     private fun assignIdentities(players: MutableList<Player>) {
         val playerCount = players.size
         val identities = when (playerCount) {
+            2 -> listOf(Identity.LORD, Identity.REBEL)  // 2人局：1主公 + 1反贼
+            3 -> listOf(Identity.LORD, Identity.REBEL, Identity.SPY)  // 3人局：1主公 + 1反贼 + 1内奸
+            4 -> listOf(Identity.LORD, Identity.LOYALIST, Identity.REBEL, Identity.SPY)  // 4人局：1主公 + 1忠臣 + 1反贼 + 1内奸
             5 -> listOf(Identity.LORD, Identity.LOYALIST, Identity.REBEL, Identity.REBEL, Identity.SPY)
             6 -> listOf(Identity.LORD, Identity.LOYALIST, Identity.REBEL, Identity.REBEL, Identity.REBEL, Identity.SPY)
             7 -> listOf(Identity.LORD, Identity.LOYALIST, Identity.LOYALIST, Identity.REBEL, Identity.REBEL, Identity.REBEL, Identity.SPY)
             8 -> listOf(Identity.LORD, Identity.LOYALIST, Identity.LOYALIST, Identity.REBEL, Identity.REBEL, Identity.REBEL, Identity.REBEL, Identity.SPY)
-            else -> listOf(Identity.LORD, Identity.REBEL)  // 简化版
-        }.shuffled()
+            else -> listOf(Identity.LORD, Identity.REBEL)  // 默认：1主公 + 1反贼
+        }
         
-        // 确保第一个玩家是主公
+        // 确保身份分配正确，不打乱顺序避免重复分配主公
+        // 第一个玩家固定为主公
         players[0].identity = Identity.LORD
+        
+        // 其余玩家从身份列表的第2个开始分配（跳过主公）
+        val otherIdentities = identities.drop(1).shuffled()  // 除了主公外的其他身份打乱
         for (i in 1 until players.size) {
-            players[i].identity = identities[i % identities.size]
+            if (i - 1 < otherIdentities.size) {
+                players[i].identity = otherIdentities[i - 1]
+            } else {
+                // 如果玩家数超过身份配置，默认分配反贼
+                players[i].identity = Identity.REBEL
+            }
+        }
+        
+        // 调试输出：打印身份分配结果
+        println("身份分配完成 - 玩家数: $playerCount")
+        players.forEachIndexed { index, player ->
+            println("  玩家 ${index + 1}: ${player.name} -> ${player.identity}")
+        }
+        
+        // 验证是否只有一个主公
+        val lordCount = players.count { it.identity == Identity.LORD }
+        if (lordCount != 1) {
+            println("警告: 发现 $lordCount 个主公，应该只有1个！")
         }
     }
     
-    private fun dealInitialCards(room: GameRoom) {
-        room.players.forEach { player ->
-            val cardCount = when (player.identity) {
-                Identity.LORD -> 6  // 主公6张
-                else -> 4  // 其他4张
-            }
-            
-            repeat(cardCount) {
-                if (room.deck.isNotEmpty()) {
-                    val card = room.deck.removeAt(0)
-                    player.cards.add(card)
-                }
-            }
-        }
-    }
     
     private fun createGenerals(): List<General> {
         return listOf(
@@ -217,31 +226,70 @@ class GameService {
     
     fun getAllRooms(): List<GameRoom> = rooms.values.toList()
     
-    fun startGame(roomId: String): GameRoom? {
+    fun startGame(roomId: String): Pair<GameRoom, List<Pair<String, List<Card>>>>? {
         val room = rooms[roomId] ?: return null
         if (room.players.size < 2) return null
         
-        // 分配身份
+        // 确保牌堆已初始化并洗牌
+        if (room.deck.isEmpty()) {
+            room.deck.addAll(CardFactory.createStandardDeck())
+        }
+        room.deck.shuffle()
+        
+        // 第一步：分配身份（确保第一个玩家是主公）
         assignIdentities(room.players)
         
-        // 选择武将（简化版 - 随机分配）
+        // 第二步：选择武将（简化版 - 随机分配）
         room.players.forEach { player ->
             val general = generals.random()
             player.general = general
-            // 调整血量上限
+            // 根据武将调整血量上限
             player.maxHealth = 4 + general.healthBonus
             player.health = player.maxHealth
         }
         
-        // 发初始手牌
-        dealInitialCards(room)
+        // 第三步：发初始手牌并记录
+        val initialCards = mutableListOf<Pair<String, List<Card>>>()
+        room.players.forEach { player ->
+            val cardCount = when (player.identity) {
+                Identity.LORD -> 6  // 主公6张
+                else -> 4  // 其他角色4张
+            }
+            
+            // 清空现有手牌
+            player.cards.clear()
+            val drawnCards = mutableListOf<Card>()
+            
+            repeat(cardCount) {
+                if (room.deck.isNotEmpty()) {
+                    val card = room.deck.removeAt(0)
+                    player.cards.add(card)
+                    drawnCards.add(card)
+                } else {
+                    // 重新洗牌
+                    if (room.discardPile.isNotEmpty()) {
+                        room.deck.addAll(room.discardPile.shuffled())
+                        room.discardPile.clear()
+                        if (room.deck.isNotEmpty()) {
+                            val card = room.deck.removeAt(0)
+                            player.cards.add(card)
+                            drawnCards.add(card)
+                        }
+                    }
+                }
+            }
+            
+            // 记录每个玩家的初始手牌
+            initialCards.add(Pair(player.id, drawnCards))
+        }
         
+        // 设置游戏状态
         room.gameState = GameState.PLAYING
-        room.currentPlayerIndex = 0
+        room.currentPlayerIndex = 0  // 从主公开始
         room.turnCount = 1
         room.gamePhase = GamePhase.DRAW
         
-        return room
+        return Pair(room, initialCards)
     }
     
     fun nextTurn(roomId: String): GameRoom? {

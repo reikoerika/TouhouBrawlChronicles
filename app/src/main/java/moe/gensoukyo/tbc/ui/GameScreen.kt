@@ -431,6 +431,7 @@ fun GameRoomScreen(
     var showGameInfo by remember { mutableStateOf(false) }
     var showPlayerOrder by remember { mutableStateOf(false) }
     var showPlayedCards by remember { mutableStateOf(false) }
+    var showDebugInfo by remember { mutableStateOf(false) }
     
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -475,6 +476,14 @@ fun GameRoomScreen(
                                 modifier = Modifier.height(32.dp)
                             ) {
                                 Text("记录", fontSize = 11.sp)
+                            }
+                            
+                            Button(
+                                onClick = { showDebugInfo = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Gray),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("调试", fontSize = 11.sp)
                             }
                         }
                         
@@ -625,6 +634,15 @@ fun GameRoomScreen(
             onDismiss = { showPlayedCards = false }
         )
     }
+    
+    // 调试信息对话框
+    if (showDebugInfo) {
+        DebugInfoDialog(
+            gameRoom = gameRoom,
+            currentPlayer = currentPlayer,
+            onDismiss = { showDebugInfo = false }
+        )
+    }
 }
 
 @Composable
@@ -650,15 +668,69 @@ fun PlayerCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text(
-                    text = player.name + if (isCurrentPlayer) " (你)" else "",
-                    fontWeight = FontWeight.Medium
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = player.name + if (isCurrentPlayer) " (你)" else "",
+                        fontWeight = FontWeight.Medium
+                    )
+                    
+                    // 身份标识
+                    player.identity?.let { identity ->
+                        val (identityText, identityColor) = when (identity) {
+                            moe.gensoukyo.tbc.shared.model.Identity.LORD -> "主" to TouhouGold
+                            moe.gensoukyo.tbc.shared.model.Identity.LOYALIST -> "忠" to TouhouBlue
+                            moe.gensoukyo.tbc.shared.model.Identity.REBEL -> "反" to DamageRed
+                            moe.gensoukyo.tbc.shared.model.Identity.SPY -> "内" to Color.Gray
+                        }
+                        
+                        Card(
+                            modifier = Modifier.padding(2.dp),
+                            colors = CardDefaults.cardColors(containerColor = identityColor.copy(alpha = 0.8f))
+                        ) {
+                            Text(
+                                text = identityText,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                
+                // 武将信息
+                player.general?.let { general ->
+                    Text(
+                        text = "武将: ${general.name} (${general.kingdom})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TouhouBlue,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                
                 Text(
                     text = "手牌: ${player.cards.size}张",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Gray
                 )
+                
+                // 装备信息 (简化显示)
+                val equipmentCount = listOfNotNull(
+                    player.equipment.weapon,
+                    player.equipment.armor,
+                    player.equipment.defensiveHorse,
+                    player.equipment.offensiveHorse
+                ).size
+                if (equipmentCount > 0) {
+                    Text(
+                        text = "装备: ${equipmentCount}件",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = HealthGreen
+                    )
+                }
             }
             
             Row(
@@ -1710,6 +1782,27 @@ fun GameStatusInfo(gameRoom: GameRoom) {
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Gray
                 )
+                
+                // 添加牌堆信息
+                Text(
+                    text = "牌堆: ${gameRoom.deck.size}张 | 弃牌: ${gameRoom.discardPile.size}张",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            } else if (gameRoom.gameState == GameState.WAITING) {
+                // 显示身份分配信息
+                val lordCount = gameRoom.players.count { it.identity == moe.gensoukyo.tbc.shared.model.Identity.LORD }
+                val loyalistCount = gameRoom.players.count { it.identity == moe.gensoukyo.tbc.shared.model.Identity.LOYALIST }
+                val rebelCount = gameRoom.players.count { it.identity == moe.gensoukyo.tbc.shared.model.Identity.REBEL }
+                val spyCount = gameRoom.players.count { it.identity == moe.gensoukyo.tbc.shared.model.Identity.SPY }
+                
+                if (lordCount + loyalistCount + rebelCount + spyCount > 0) {
+                    Text(
+                        text = "身份配置: 主$lordCount 忠$loyalistCount 反$rebelCount 内$spyCount",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TouhouBlue
+                    )
+                }
             }
         }
         
@@ -1719,12 +1812,41 @@ fun GameStatusInfo(gameRoom: GameRoom) {
                     gameRoom.players[gameRoom.currentPlayerIndex]
                 } else null
                 
-                Text(
-                    text = "当前玩家: ${currentPlayer?.name ?: "未知"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = TouhouRed
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "当前玩家: ${currentPlayer?.name ?: "未知"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = TouhouRed
+                    )
+                    
+                    // 显示当前玩家身份
+                    currentPlayer?.identity?.let { identity ->
+                        val (identityText, identityColor) = when (identity) {
+                            moe.gensoukyo.tbc.shared.model.Identity.LORD -> "主" to TouhouGold
+                            moe.gensoukyo.tbc.shared.model.Identity.LOYALIST -> "忠" to TouhouBlue
+                            moe.gensoukyo.tbc.shared.model.Identity.REBEL -> "反" to DamageRed
+                            moe.gensoukyo.tbc.shared.model.Identity.SPY -> "内" to Color.Gray
+                        }
+                        
+                        Card(
+                            modifier = Modifier.padding(2.dp),
+                            colors = CardDefaults.cardColors(containerColor = identityColor.copy(alpha = 0.8f))
+                        ) {
+                            Text(
+                                text = identityText,
+                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp),
+                                color = Color.White,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                
                 Text(
                     text = "阶段: ${when(gameRoom.gamePhase) {
                         GamePhase.DRAW -> "摸牌"
@@ -1734,6 +1856,23 @@ fun GameStatusInfo(gameRoom: GameRoom) {
                     style = MaterialTheme.typography.bodySmall,
                     color = TouhouBlue
                 )
+                
+                // 显示当前玩家血量和武将
+                currentPlayer?.let { player ->
+                    Text(
+                        text = "血量: ${player.health}/${player.maxHealth}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (player.health > player.maxHealth * 0.3) HealthGreen else DamageRed
+                    )
+                    
+                    player.general?.let { general ->
+                        Text(
+                            text = "武将: ${general.name}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                }
             }
         }
     }
@@ -1995,6 +2134,183 @@ fun PlayedCardsHistoryDialog(
                                         modifier = Modifier.padding(top = 4.dp)
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        }
+    )
+}
+
+@Composable
+fun DebugInfoDialog(
+    gameRoom: GameRoom,
+    currentPlayer: Player?,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("调试信息") },
+        text = {
+            LazyColumn(
+                modifier = Modifier.height(400.dp)
+            ) {
+                item {
+                    // 房间基本信息
+                    Text(
+                        text = "房间信息",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TouhouRed,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    
+                    Text("房间ID: ${gameRoom.id}")
+                    Text("房间名: ${gameRoom.name}")
+                    Text("最大玩家: ${gameRoom.maxPlayers}")
+                    Text("当前玩家数: ${gameRoom.players.size}")
+                    Text("观战者数: ${gameRoom.spectators.size}")
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // 游戏状态信息
+                    Text(
+                        text = "游戏状态",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TouhouBlue,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    
+                    Text("游戏状态: ${gameRoom.gameState}")
+                    Text("游戏阶段: ${gameRoom.gamePhase}")
+                    Text("回合数: ${gameRoom.turnCount}")
+                    Text("当前玩家索引: ${gameRoom.currentPlayerIndex}")
+                    Text("当前玩家: ${gameRoom.currentPlayer?.name ?: "无"}")
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // 牌堆信息
+                    Text(
+                        text = "牌堆信息",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TouhouGold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    
+                    Text("牌堆剩余: ${gameRoom.deck.size}张")
+                    Text("弃牌堆: ${gameRoom.discardPile.size}张")
+                    Text("当前回合出牌: ${gameRoom.currentTurnPlayedCards.size}张")
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+                
+                // 当前玩家信息
+                if (currentPlayer != null) {
+                    item {
+                        Text(
+                            text = "当前客户端玩家",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = DamageRed,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        
+                        Text("玩家ID: ${currentPlayer.id}")
+                        Text("玩家名: ${currentPlayer.name}")
+                        Text("身份: ${currentPlayer.identity ?: "未分配"}")
+                        Text("武将: ${currentPlayer.general?.name ?: "未选择"}")
+                        Text("血量: ${currentPlayer.health}${currentPlayer.maxHealth}")
+                        Text("手牌数: ${currentPlayer.cards.size}")
+                        Text("已出牌数: ${currentPlayer.playedCards.size}")
+                        Text("是否铁索: ${currentPlayer.isChained}")
+                        Text("延时锦囊: ${currentPlayer.delayedCards.size}张")
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text("装备详情:", fontWeight = FontWeight.Bold)
+                        Text("  武器: ${currentPlayer.equipment.weapon?.name ?: "无"}")
+                        Text("  防具: ${currentPlayer.equipment.armor?.name ?: "无"}")
+                        Text("  攻击马: ${currentPlayer.equipment.offensiveHorse?.name ?: "无"}")
+                        Text("  防御马: ${currentPlayer.equipment.defensiveHorse?.name ?: "无"}")
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+                }
+                
+                // 所有玩家详细信息
+                item {
+                    Text(
+                        text = "所有玩家详情",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = HealthGreen,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                
+                items(gameRoom.players) { player ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = when (player.identity) {
+                                moe.gensoukyo.tbc.shared.model.Identity.LORD -> TouhouGold.copy(alpha = 0.1f)
+                                moe.gensoukyo.tbc.shared.model.Identity.LOYALIST -> TouhouBlue.copy(alpha = 0.1f)
+                                moe.gensoukyo.tbc.shared.model.Identity.REBEL -> DamageRed.copy(alpha = 0.1f)
+                                moe.gensoukyo.tbc.shared.model.Identity.SPY -> Color.Gray.copy(alpha = 0.1f)
+                                null -> MaterialTheme.colorScheme.surface
+                            }
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = player.name,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                
+                                player.identity?.let { identity ->
+                                    val identityText = when (identity) {
+                                        moe.gensoukyo.tbc.shared.model.Identity.LORD -> "主公"
+                                        moe.gensoukyo.tbc.shared.model.Identity.LOYALIST -> "忠臣"
+                                        moe.gensoukyo.tbc.shared.model.Identity.REBEL -> "反贼"
+                                        moe.gensoukyo.tbc.shared.model.Identity.SPY -> "内奸"
+                                    }
+                                    Text(
+                                        text = identityText,
+                                        fontSize = 10.sp,
+                                        color = Color.Gray
+                                    )
+                                }
+                            }
+                            
+                            Text("ID: ${player.id}", fontSize = 10.sp, color = Color.Gray)
+                            player.general?.let { general ->
+                                Text("武将: ${general.name} (${general.kingdom}) +${general.healthBonus}血", fontSize = 10.sp)
+                            }
+                            Text("生命: ${player.health}/${player.maxHealth}", fontSize = 10.sp)
+                            Text("手牌: ${player.cards.size}张, 已出牌: ${player.playedCards.size}张", fontSize = 10.sp)
+                            
+                            val equipments = listOfNotNull(
+                                player.equipment.weapon?.name,
+                                player.equipment.armor?.name,
+                                player.equipment.offensiveHorse?.name,
+                                player.equipment.defensiveHorse?.name
+                            )
+                            if (equipments.isNotEmpty()) {
+                                Text("装备: ${equipments.joinToString(", ")}", fontSize = 10.sp)
                             }
                         }
                     }

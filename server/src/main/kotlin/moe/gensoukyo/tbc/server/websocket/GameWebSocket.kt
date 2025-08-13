@@ -111,13 +111,27 @@ fun Route.gameWebSocket(gameService: GameService) {
                             }
                             
                             is ClientMessage.StartGame -> {
-                                val room = gameService.startGame(message.roomId)
-                                if (room != null) {
+                                val result = gameService.startGame(message.roomId)
+                                if (result != null) {
+                                    val (room, initialCards) = result
+                                    
+                                    // 首先广播游戏开始消息
                                     broadcastToRoom(connections, playerSessions, spectatorSessions, message.roomId, room, gameService) {
                                         ServerMessage.GameStarted(room)
                                     }
                                     
-                                    // 通知第一个玩家开始回合
+                                    // 然后向每个玩家发送他们的初始手牌
+                                    initialCards.forEach { (playerId, cards) ->
+                                        val sessionId = playerSessions[playerId]
+                                        val session = connections[sessionId]
+                                        session?.send(
+                                            Json.encodeToString<ServerMessage>(
+                                                ServerMessage.InitialCardsDealt(playerId, cards)
+                                            )
+                                        )
+                                    }
+                                    
+                                    // 最后通知第一个玩家（主公）开始回合
                                     room.currentPlayer?.let { currentPlayer ->
                                         val currentPlayerSessionId = playerSessions[currentPlayer.id]
                                         val currentPlayerSession = connections[currentPlayerSessionId]
