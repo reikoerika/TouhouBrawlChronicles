@@ -1,194 +1,190 @@
 package moe.gensoukyo.tbc.server.websocket
 
 import io.ktor.websocket.WebSocketSession
-import io.ktor.websocket.send
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import moe.gensoukyo.tbc.server.card.*
 import moe.gensoukyo.tbc.server.service.GameService
+import moe.gensoukyo.tbc.server.utils.SafeWebSocketManager
 import moe.gensoukyo.tbc.shared.card.CardExecutionContext
 import moe.gensoukyo.tbc.shared.card.CardExecutionPhase
 import moe.gensoukyo.tbc.shared.messages.*
-import moe.gensoukyo.tbc.shared.model.Card
+import moe.gensoukyo.tbc.shared.utils.*
 
 /**
- * 新的卡牌执行WebSocket处理器
- * 使用简化的消息流程，符合三国杀标准
+ * 重构后的卡牌执行WebSocket处理器
+ * 包含完善的错误处理和调试功能
  */
 class CardExecutionHandler(
-    private val gameService: GameService
+    private val gameService: GameService,
+    private val webSocketManager: SafeWebSocketManager = SafeWebSocketManager(),
+    private val playerSessions: Map<String, String> = emptyMap(),
+    private val spectatorSessions: Map<String, String> = emptyMap()
 ) {
     
+    init {
+        Logger.setLevel(Logger.Level.DEBUG) // 开发阶段启用详细日志
+    }
+    
     /**
-     * 处理出牌消息
+     * 同步连接到WebSocket管理器
+     */
+    fun syncConnections(connections: Map<String, WebSocketSession>) {
+        // 清理旧连接
+        webSocketManager.cleanup()
+        
+        // 添加所有当前活跃连接
+        connections.forEach { (sessionId, session) ->
+            webSocketManager.addConnection(sessionId, session)
+        }
+        
+        logDebug("Synced ${connections.size} connections to SafeWebSocketManager")
+    }
+    
+    /**
+     * 安全地处理出牌消息
      */
     suspend fun handlePlayCard(
         message: PlayCardMessage,
-        connections: Map<String, WebSocketSession>,
-        playerSessions: Map<String, String>,
-        spectatorSessions: Map<String, String>
-    ) {
-        val roomId = findPlayerRoom(message.playerId) ?: return
-        
-        // 执行出牌
-        val context = gameService.playCardNew(roomId, message.playerId, message.cardId, message.targetIds)
-            ?: return
-        
-        val room = gameService.getRoom(roomId) ?: return
-        
-        // 广播卡牌执行开始
-        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId) {
-            CardExecutionStartedMessage(
-                executionId = context.id,
-                casterName = context.caster.name,
-                cardName = context.card.name,
-                targetNames = context.finalTargets.map { it.name },
-                room = room
-            )
+        connections: Map<String, WebSocketSession>
+    ): Result<Unit> {
+        return runCatching {
+            logDebug("Handling play card: player=${message.playerId}, card=${message.cardId}, targets=${message.targetIds}")
+
+            val roomId = findPlayerRoom(message.playerId)
+                ?: return Result.failure(IllegalStateException("Player ${message.playerId} not found in any room"))
+
+            logInfo("Starting card execution for player ${message.playerId} in room $roomId")
+
+            val context = gameService.playCardNew(roomId, message.playerId, message.cardId, message.targetIds)
+                ?: return Result.failure(IllegalStateException("Failed to start card execution"))
+
+            // 更新WebSocket连接映射
+            updateConnectionMappings(connections, playerSessions, spectatorSessions)
+
+            // 广播卡牌执行开始
+            broadcastCardExecutionStarted(context, roomId)
+
+            // 处理下一阶段
+            handleNextPhase(context, roomId)
+        }.onFailure { error ->
+            logError("Failed to handle play card", error)
         }
-        
-        // 处理下一阶段
-        handleNextPhase(context, roomId, connections, playerSessions, spectatorSessions)
     }
     
     /**
-     * 处理响应消息
+     * 安全地处理响应消息
      */
     suspend fun handleResponse(
         message: RespondToCardMessage,
-        connections: Map<String, WebSocketSession>,
-        playerSessions: Map<String, String>,
-        spectatorSessions: Map<String, String>
-    ) {
-        val roomId = findPlayerRoom(message.playerId) ?: return
-        
-        // 处理响应
-        val context = gameService.respondToCardNew(roomId, message.playerId, message.responseCardId, message.accept)
-            ?: return
-        
-        val room = gameService.getRoom(roomId) ?: return
-        
-        // 广播响应结果
-        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId) {
-            ResponseReceivedMessage(
-                executionId = context.id,
-                playerId = message.playerId,
-                playerName = room.players.find { it.id == message.playerId }?.name ?: "未知",
-                responseCard = context.responses.lastOrNull()?.responseCard,
-                accepted = message.accept,
-                room = room
-            )
-        }
-        
-        // 如果执行完成，发送完成消息
-        if (context.isCompleted) {
-            broadcastToRoom(connections, playerSessions, spectatorSessions, roomId) {
-                CardExecutionCompletedMessage(
-                    executionId = context.id,
-                    success = context.result?.success ?: false,
-                    blocked = context.isBlocked,
-                    message = context.result?.message ?: "执行完成",
-                    room = room
-                )
-            }
-        } else {
-            // 继续下一阶段
-            handleNextPhase(context, roomId, connections, playerSessions, spectatorSessions)
+        connections: Map<String, WebSocketSession>
+    ): Result<Unit> {
+        return runCatching {
+            logDebug("Handling response: player=${message.playerId}, responseCard=${message.responseCardId}, accept=${message.accept}")
+            
+            val roomId = findPlayerRoom(message.playerId)
+                ?: return Result.failure(IllegalStateException("Player ${message.playerId} not found in any room"))
+            
+            // 更新WebSocket连接映射
+            updateConnectionMappings(connections, playerSessions, spectatorSessions)
+            
+            val context = gameService.respondToCardNew(roomId, message.playerId, message.responseCardId, message.accept)
+                ?: return Result.failure(IllegalStateException("Failed to process response"))
+            
+            // 广播响应结果
+            broadcastResponseReceived(context, roomId, message)
+            
+            // 处理下一阶段
+            handleNextPhase(context, roomId)
+        }.onFailure { error ->
+            logError("Failed to handle response", error)
         }
     }
     
     /**
-     * 处理下一执行阶段
+     * 处理卡牌执行的下一阶段
      */
-    private suspend fun handleNextPhase(
-        context: CardExecutionContext,
-        roomId: String,
-        connections: Map<String, WebSocketSession>,
-        playerSessions: Map<String, String>,
-        spectatorSessions: Map<String, String>
-    ) {
+    private suspend fun handleNextPhase(context: CardExecutionContext, roomId: String) {
+        logDebug("Processing phase: ${context.phase} for execution ${context.id}")
+        
         when (context.phase) {
-            CardExecutionPhase.NULLIFICATION -> {
-                handleNullificationPhase(context, roomId, connections, playerSessions, spectatorSessions)
-            }
-            CardExecutionPhase.RESOLUTION -> {
-                handleResolutionPhase(context, roomId, connections, playerSessions, spectatorSessions)
-            }
-            CardExecutionPhase.SPECIAL_EXECUTION -> {
-                handleSpecialExecutionPhase(context, roomId, connections, playerSessions, spectatorSessions)
-            }
-            CardExecutionPhase.COMPLETED -> {
-                val room = gameService.getRoom(roomId) ?: return
-                broadcastToRoom(connections, playerSessions, spectatorSessions, roomId) {
-                    CardExecutionCompletedMessage(
-                        executionId = context.id,
-                        success = context.result?.success ?: false,
-                        blocked = context.isBlocked,
-                        message = context.result?.message ?: "执行完成",
-                        room = room
-                    )
-                }
-            }
-            else -> {}
+            CardExecutionPhase.NULLIFICATION -> handleNullificationPhase(context, roomId)
+            CardExecutionPhase.RESOLUTION -> handleResolutionPhase(context, roomId)
+            CardExecutionPhase.SPECIAL_EXECUTION -> handleSpecialExecutionPhase(context, roomId)
+            CardExecutionPhase.COMPLETED -> handleCompletedPhase(context, roomId)
+            else -> logWarn("Unknown execution phase: ${context.phase}")
         }
     }
     
     /**
      * 处理无懈可击阶段
      */
-    private suspend fun handleNullificationPhase(
-        context: CardExecutionContext,
-        roomId: String,
-        connections: Map<String, WebSocketSession>,
-        playerSessions: Map<String, String>,
-        spectatorSessions: Map<String, String>
-    ) {
-        val targetPlayerId = gameService.getCurrentResponseTarget(roomId) ?: return
-        val targetSession = connections[playerSessions[targetPlayerId]] ?: return
+    private suspend fun handleNullificationPhase(context: CardExecutionContext, roomId: String) {
+        val room = gameService.getRoom(roomId)
+        if (room == null) {
+            logError("Room $roomId not found during nullification phase")
+            return
+        }
         
-        // 发送无懈可击响应请求
-        targetSession.send(
-            Json.encodeToString(
-                ResponseRequiredMessage(
+        val targetPlayerIds = gameService.getAllNullificationTargets(roomId)
+        if (targetPlayerIds.isEmpty()) {
+            logWarn("No players can respond to nullification for execution ${context.id}")
+            // 直接进入下一阶段
+            val updatedContext = gameService.executeCardEffect(roomId, context.id)
+            updatedContext?.let { handleNextPhase(it, roomId) }
+            return
+        }
+        
+        // 广播无懈可击阶段开始
+        broadcastToRoom(roomId) {
+            ServerMessage.NullificationPhaseStarted(
+                executionId = context.id,
+                cardName = context.card.name,
+                casterName = context.caster.name,
+                targetPlayerIds = targetPlayerIds,
+                room = room
+            )
+        }
+        
+        // 向所有可以响应的玩家发送无懈可击响应请求
+        targetPlayerIds.forEach { playerId ->
+            sendMessageToPlayer(playerId, roomId) {
+                ServerMessage.ResponseRequired(
                     executionId = context.id,
-                    targetPlayerId = targetPlayerId,
+                    targetPlayerId = playerId,
                     responseType = "NULLIFICATION",
                     originalCard = context.card,
                     casterName = context.caster.name
                 )
-            )
-        )
+            }
+        }
     }
     
     /**
      * 处理结算阶段
      */
-    private suspend fun handleResolutionPhase(
-        context: CardExecutionContext,
-        roomId: String,
-        connections: Map<String, WebSocketSession>,
-        playerSessions: Map<String, String>,
-        spectatorSessions: Map<String, String>
-    ) {
-        // 继续执行卡牌效果
-        val updatedContext = gameService.continueCardExecution(roomId) ?: return
-        
-        // 处理执行后的状态
-        handleNextPhase(updatedContext, roomId, connections, playerSessions, spectatorSessions)
+    private suspend fun handleResolutionPhase(context: CardExecutionContext, roomId: String) {
+        val updatedContext = gameService.executeCardEffect(roomId, context.id)
+        if (updatedContext != null) {
+            handleNextPhase(updatedContext, roomId)
+        } else {
+            logError("Failed to execute card effect for execution ${context.id}")
+        }
     }
     
     /**
-     * 处理特殊执行阶段（如五谷丰登）
+     * 处理特殊执行阶段
      */
-    private suspend fun handleSpecialExecutionPhase(
-        context: CardExecutionContext,
-        roomId: String,
-        connections: Map<String, WebSocketSession>,
-        playerSessions: Map<String, String>,
-        spectatorSessions: Map<String, String>
-    ) {
-        val room = gameService.getRoom(roomId) ?: return
-        val targetPlayerId = gameService.getCurrentResponseTarget(roomId) ?: return
+    private suspend fun handleSpecialExecutionPhase(context: CardExecutionContext, roomId: String) {
+        val room = gameService.getRoom(roomId)
+        if (room == null) {
+            logError("Room $roomId not found during special execution phase")
+            return
+        }
+        
+        val targetPlayerId = gameService.getCurrentResponseTarget(roomId)
+        if (targetPlayerId == null) {
+            logWarn("No target player for special execution ${context.id}")
+            return
+        }
+        
         val targetPlayerName = room.players.find { it.id == targetPlayerId }?.name ?: "未知"
         
         // 获取可用选项
@@ -206,8 +202,8 @@ class CardExecutionHandler(
         }
         
         // 广播特殊执行开始
-        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId) {
-            SpecialExecutionStartedMessage(
+        broadcastToRoom(roomId) {
+            ServerMessage.SpecialExecutionStarted(
                 executionId = context.id,
                 cardName = context.card.name,
                 currentPlayerId = targetPlayerId,
@@ -218,49 +214,169 @@ class CardExecutionHandler(
         }
         
         // 发送选择请求给当前玩家
-        val targetSession = connections[playerSessions[targetPlayerId]] ?: return
-        targetSession.send(
-            Json.encodeToString(
-                ResponseRequiredMessage(
-                    executionId = context.id,
-                    targetPlayerId = targetPlayerId,
-                    responseType = "SPECIAL_SELECTION",
-                    originalCard = context.card,
-                    casterName = context.caster.name,
-                    availableOptions = availableOptions
-                )
+        sendMessageToPlayer(targetPlayerId, roomId) {
+            ServerMessage.ResponseRequired(
+                executionId = context.id,
+                targetPlayerId = targetPlayerId,
+                responseType = "SPECIAL_SELECTION",
+                originalCard = context.card,
+                casterName = context.caster.name,
+                availableOptions = availableOptions
             )
-        )
+        }
+    }
+    
+    /**
+     * 处理完成阶段
+     */
+    private suspend fun handleCompletedPhase(context: CardExecutionContext, roomId: String) {
+        val room = gameService.getRoom(roomId)
+        if (room == null) {
+            logError("Room $roomId not found during completion phase")
+            return
+        }
+        
+        broadcastToRoom(roomId) {
+            ServerMessage.CardExecutionCompleted(
+                executionId = context.id,
+                success = context.result?.success ?: false,
+                blocked = context.isBlocked,
+                message = context.result?.message ?: "执行完成",
+                room = room
+            )
+        }
+        
+        // 清理执行上下文
+        gameService.cleanupCardExecution(roomId, context.id)
     }
     
     // ======================== 辅助方法 ========================
     
+    /**
+     * 更新WebSocket连接映射
+     */
+    private fun updateConnectionMappings(
+        connections: Map<String, WebSocketSession>,
+        playerSessions: Map<String, String>,
+        spectatorSessions: Map<String, String>
+    ) {
+        // 清理现有连接
+        webSocketManager.cleanup()
+        
+        // 添加玩家连接
+        playerSessions.forEach { (playerId, sessionId) ->
+            connections[sessionId]?.let { session ->
+                webSocketManager.addConnection(sessionId, session)
+            }
+        }
+        
+        // 添加观战者连接
+        spectatorSessions.forEach { (spectatorId, sessionId) ->
+            connections[sessionId]?.let { session ->
+                webSocketManager.addConnection(sessionId, session)
+            }
+        }
+    }
+    
+    /**
+     * 安全地广播消息到房间
+     */
+    private suspend fun broadcastToRoom(roomId: String, messageProvider: () -> ServerMessage) {
+        val room = gameService.getRoom(roomId)
+        if (room == null) {
+            logError("Cannot broadcast to room $roomId: room not found")
+            return
+        }
+        
+        val allPlayerIds = room.players.map { it.id } + room.spectators.map { it.id }
+        val sessionIds = allPlayerIds.mapNotNull { playerId ->
+            playerSessions[playerId] ?: spectatorSessions[playerId]
+        }
+        
+        if (sessionIds.isEmpty()) {
+            logWarn("No active sessions found for room $roomId - playerSessions: ${playerSessions.keys}, spectatorSessions: ${spectatorSessions.keys}, roomPlayerIds: ${allPlayerIds}")
+            return
+        }
+        
+        val message = messageProvider()
+        val successCount = webSocketManager.broadcastMessage(sessionIds, message)
+        
+        logDebug("Broadcast to room $roomId: $successCount/${sessionIds.size} successful")
+    }
+    
+    /**
+     * 安全地发送消息给指定玩家
+     */
+    private suspend fun sendMessageToPlayer(playerId: String, roomId: String, messageProvider: () -> ServerMessage) {
+        val sessionId = playerSessions[playerId] ?: spectatorSessions[playerId]
+        if (sessionId == null) {
+            logWarn("No session found for player $playerId in room $roomId")
+            return
+        }
+        
+        val message = messageProvider()
+        val success = webSocketManager.sendMessage(sessionId, message)
+        
+        if (success) {
+            logDebug("Message sent to player $playerId: ${message::class.simpleName}")
+        } else {
+            logError("Failed to send message to player $playerId")
+        }
+    }
+    
+    /**
+     * 广播卡牌执行开始消息
+     */
+    private suspend fun broadcastCardExecutionStarted(context: CardExecutionContext, roomId: String) {
+        val room = gameService.getRoom(roomId)
+        if (room == null) {
+            logError("Room $roomId not found when broadcasting card execution started")
+            return
+        }
+        
+        broadcastToRoom(roomId) {
+            ServerMessage.CardExecutionStarted(
+                executionId = context.id,
+                casterName = context.caster.name,
+                cardName = context.card.name,
+                targetNames = context.finalTargets.map { it.name },
+                room = room
+            )
+        }
+    }
+    
+    /**
+     * 广播响应接收消息
+     */
+    private suspend fun broadcastResponseReceived(
+        context: CardExecutionContext,
+        roomId: String,
+        message: RespondToCardMessage
+    ) {
+        val room = gameService.getRoom(roomId)
+        if (room == null) {
+            logError("Room $roomId not found when broadcasting response received")
+            return
+        }
+        
+        broadcastToRoom(roomId) {
+            ServerMessage.ResponseReceived(
+                executionId = context.id,
+                playerId = message.playerId,
+                playerName = room.players.find { it.id == message.playerId }?.name ?: "未知",
+                responseCard = context.responses.lastOrNull()?.responseCard,
+                accepted = message.accept,
+                room = room
+            )
+        }
+    }
+    
+    /**
+     * 查找玩家所在房间
+     */
     private fun findPlayerRoom(playerId: String): String? {
         return gameService.getAllRooms().find { room ->
             room.players.any { it.id == playerId }
         }?.id
-    }
-    
-    private suspend fun broadcastToRoom(
-        connections: Map<String, WebSocketSession>,
-        playerSessions: Map<String, String>,
-        spectatorSessions: Map<String, String>,
-        roomId: String,
-        messageProvider: () -> Any
-    ) {
-        val room = gameService.getRoom(roomId) ?: return
-        val message = Json.encodeToString(messageProvider())
-        
-        // 发送给所有房间内的玩家
-        room.players.forEach { player ->
-            val sessionId = playerSessions[player.id]
-            sessionId?.let { connections[it]?.send(message) }
-        }
-        
-        // 发送给所有观战者
-        room.spectators.forEach { spectator ->
-            val sessionId = spectatorSessions[spectator.id]
-            sessionId?.let { connections[it]?.send(message) }
-        }
     }
 }

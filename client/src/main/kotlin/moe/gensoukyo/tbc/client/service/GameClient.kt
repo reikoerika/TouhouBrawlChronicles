@@ -156,9 +156,9 @@ class GameClient {
             
             is ServerMessage.CardResponseReceived -> {
                 if (message.responseCard != null) {
-                    println("\\n${message.playerName}出了${message.responseCard.name}进行响应")
+                    println("\\n${message.playerId}出了${message.responseCard!!.name}进行响应")
                 } else {
-                    println("\\n${message.playerName}选择${if (message.accepted) "接受" else "拒绝"}响应")
+                    println("\\n${message.playerId}选择${if (message.accepted) "接受" else "拒绝"}响应")
                 }
                 currentRoom = message.room
             }
@@ -182,7 +182,7 @@ class GameClient {
                 println("房间信息：${message.room.name}")
                 println("玩家列表：")
                 message.room.players.forEach { player ->
-                    println("- ${player.name} (${player.identity.displayName}) 体力：${player.health}/${player.maxHealth}")
+                    println("- ${player.name} (${player.identity?.displayName}) 体力：${player.health}/${player.maxHealth}")
                 }
                 currentRoom = message.room
             }
@@ -222,6 +222,63 @@ class GameClient {
                 if (currentPlayer?.id == message.playerId) {
                     showGameMenu()
                 }
+            }
+
+            is ServerMessage.CardExecutionStarted -> {
+                println("\\n${message.casterName}使用了${message.cardName}")
+                if (message.targetNames.isNotEmpty()) {
+                    println("目标：${message.targetNames.joinToString(", ")}")
+                }
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.ResponseRequired -> {
+                if (currentPlayer?.id == message.targetPlayerId) {
+                    println("\\n需要响应${message.casterName}的${message.originalCard.name}")
+                    when (message.responseType) {
+                        "NULLIFICATION" -> {
+                            println("是否使用无懈可击？")
+                            handleNullificationResponse()
+                        }
+                        "SPECIAL_SELECTION" -> {
+                            println("请选择一个选项：")
+                            message.availableOptions.forEachIndexed { index, option ->
+                                println("${index + 1}. ${option.name} - ${option.description}")
+                            }
+                            handleSpecialSelection(message.availableOptions)
+                        }
+                    }
+                }
+            }
+            
+            is ServerMessage.ResponseReceived -> {
+                if (message.responseCard != null) {
+                    println("\\n${message.playerName}使用了${message.responseCard?.name?:"null"}响应")
+                } else {
+                    println("\\n${message.playerName}选择了${if (message.accepted) "接受" else "拒绝"}响应")
+                }
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.CardExecutionCompleted -> {
+                println("\\n卡牌执行${if (message.success) "成功" else "失败"}")
+                if (message.blocked) {
+                    println("被无懈可击阻挡")
+                }
+                println(message.message)
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.SpecialExecutionStarted -> {
+                println("\\n${message.cardName}特殊效果开始")
+                println("当前玩家：${message.currentPlayerName}")
+                currentRoom = message.room
+            }
+            
+            is ServerMessage.NullificationPhaseStarted -> {
+                println("\\n无懈可击阶段开始")
+                println("${message.casterName}使用了${message.cardName}")
+                println("所有玩家可以使用无懈可击响应")
             }
         }
     }
@@ -413,7 +470,7 @@ class GameClient {
         }
         
         val responseCardId = if (choice > 0) player.cards[choice - 1].id else null
-        val message = ClientMessage.RespondToCard(player.id, responseCardId, choice > 0)
+        val message = ClientMessage.RespondToCardNew(player.id, responseCardId, choice > 0)
         session?.send(Json.encodeToString<ClientMessage>(message))
     }
     
@@ -461,7 +518,7 @@ class GameClient {
             }
         }
         
-        val message = ClientMessage.PlayCard(player.id, card.id, targetIds)
+        val message = ClientMessage.PlayCardNew(player.id, card.id, targetIds)
         session?.send(Json.encodeToString<ClientMessage>(message))
     }
     
@@ -478,9 +535,52 @@ class GameClient {
             val status = if (player.health <= 0) "[已阵亡]" else ""
             val current = if (room.currentPlayer?.id == player.id) "[当前回合]" else ""
             println("- ${player.name} $status $current")
-            println("  身份：${player.identity.displayName}")
+            println("  身份：${player.identity?.displayName}")
             println("  体力：${player.health}/${player.maxHealth}")
             println("  手牌：${player.cards.size}张")
         }
+    }
+    
+    private suspend fun handleNullificationResponse() {
+        val player = currentPlayer ?: return
+        
+        // 查找无懈可击卡牌
+        val wuxieKeji = player.cards.find { it.name == "无懈可击" }
+        
+        println("\\n选择响应方式:")
+        if (wuxieKeji != null) {
+            println("1. 使用无懈可击")
+            println("2. 不响应")
+        } else {
+            println("1. 不响应")
+        }
+        
+        print("请选择: ")
+        val choice = readlnOrNull()?.toIntOrNull() ?: 1
+        
+        val responseCardId = if (wuxieKeji != null && choice == 1) wuxieKeji.id else null
+        val accept = responseCardId != null
+        
+        val message = ClientMessage.RespondToCardNew(player.id, responseCardId, accept)
+        session?.send(Json.encodeToString<ClientMessage>(message))
+    }
+    
+    private suspend fun handleSpecialSelection(options: List<moe.gensoukyo.tbc.shared.messages.ResponseOption>) {
+        if (options.isEmpty()) return
+        
+        print("请选择 (输入序号): ")
+        val choice = readlnOrNull()?.toIntOrNull()
+        
+        if (choice == null || choice < 1 || choice > options.size) {
+            println("无效选择，默认选择第一个选项")
+            val selectedOption = options.first()
+            val message = ClientMessage.RespondToCardNew(currentPlayer?.id ?: "", selectedOption.id, true)
+            session?.send(Json.encodeToString<ClientMessage>(message))
+            return
+        }
+        
+        val selectedOption = options[choice - 1]
+        val message = ClientMessage.RespondToCardNew(currentPlayer?.id ?: "", selectedOption.id, true)
+        session?.send(Json.encodeToString<ClientMessage>(message))
     }
 }

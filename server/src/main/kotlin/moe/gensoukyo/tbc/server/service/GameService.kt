@@ -242,8 +242,15 @@ class GameService {
         if (cardIndex == -1) return null
         
         val card = player.cards[cardIndex]
-        val targets = targetIds.mapNotNull { targetId -> 
-            room.players.find { it.id == targetId } 
+        
+        // 根据卡牌的目标类型自动确定目标
+        val targets = when (card.targetType) {
+            TargetType.ALL_PLAYERS -> room.players.filter { it.health > 0 }
+            TargetType.ALL_OTHERS -> room.players.filter { it.id != playerId && it.health > 0 }
+            TargetType.NONE -> emptyList()
+            else -> targetIds.mapNotNull { targetId -> 
+                room.players.find { it.id == targetId } 
+            }
         }
         
         // 验证出牌合法性
@@ -262,53 +269,7 @@ class GameService {
         
         return context
     }
-    
-    /**
-     * 处理卡牌响应
-     */
-    fun respondToCardNew(roomId: String, playerId: String, responseCardId: String?, accept: Boolean): CardExecutionContext? {
-        val room = rooms[roomId] ?: return null
-        val context = room.activeCardExecution ?: return null
-        
-        val respondingPlayer = room.players.find { it.id == playerId } ?: return null
-        var responseCard: Card? = null
-        
-        // 处理响应卡牌
-        if (responseCardId != null && accept) {
-            val cardIndex = respondingPlayer.cards.indexOfFirst { it.id == responseCardId }
-            if (cardIndex != -1) {
-                responseCard = respondingPlayer.cards.removeAt(cardIndex)
-                room.discardPile.add(responseCard)
-            }
-        }
-        
-        // 根据当前阶段处理响应
-        val updatedContext = when (context.phase) {
-            CardExecutionPhase.NULLIFICATION -> {
-                cardExecutionEngine.handleNullificationResponse(context.id, playerId, responseCard)
-            }
-            CardExecutionPhase.SPECIAL_EXECUTION -> {
-                responseCardId?.let { 
-                    cardExecutionEngine.handleSpecialResponse(context.id, playerId, it, room)
-                }
-            }
-            else -> null
-        }
-        
-        // 如果执行完成，清理状态
-        if (updatedContext?.isCompleted == true) {
-            room.activeCardExecution = null
-            cardExecutionEngine.cleanupExecution(context.id)
-            
-            // 将原始卡牌加入弃牌堆
-            if (context.card.type != CardType.EQUIPMENT) {
-                room.discardPile.add(context.card)
-            }
-        }
-        
-        return updatedContext
-    }
-    
+
     /**
      * 继续执行卡牌效果（用于无懈可击响应完成后）
      */
@@ -344,7 +305,17 @@ class GameService {
         val room = rooms[roomId] ?: return null
         val context = room.activeCardExecution ?: return null
         
-        return cardExecutionEngine.getResponseTarget(context.id)
+        return cardExecutionEngine.getResponseTarget(context.id, room)
+    }
+    
+    /**
+     * 获取无懈可击阶段所有可以响应的玩家
+     */
+    fun getAllNullificationTargets(roomId: String): List<String> {
+        val room = rooms[roomId] ?: return emptyList()
+        val context = room.activeCardExecution ?: return emptyList()
+        
+        return cardExecutionEngine.getAllNullificationTargets(context.id, room)
     }
     
     /**
@@ -932,5 +903,57 @@ class GameService {
                 }
             }
         }
+    }
+    
+    // ======================== 新系统相关方法 ========================
+    
+    /**
+     * 新系统的响应处理
+     */
+    fun respondToCardNew(roomId: String, playerId: String, responseCardId: String?, accept: Boolean): CardExecutionContext? {
+        val room = rooms[roomId] ?: return null
+        val context = room.activeCardExecution ?: return null
+        
+        when (context.phase) {
+            CardExecutionPhase.NULLIFICATION -> {
+                val responseCard = responseCardId?.let { cardId ->
+                    room.players.find { it.id == playerId }?.cards?.find { it.id == cardId }
+                }
+                return cardExecutionEngine.handleNullificationResponse(context.id, playerId, responseCard, room)
+            }
+            CardExecutionPhase.SPECIAL_EXECUTION -> {
+                responseCardId?.let {
+                    return cardExecutionEngine.handleSpecialResponse(context.id, playerId, it, room)
+                }
+            }
+            else -> return null
+        }
+        
+        return null
+    }
+    
+    /**
+     * 执行卡牌效果
+     */
+    fun executeCardEffect(roomId: String, executionId: String): CardExecutionContext? {
+        val room = rooms[roomId] ?: return null
+        return cardExecutionEngine.executeCardEffect(executionId, room)
+    }
+    
+    /**
+     * 清理卡牌执行上下文
+     */
+    fun cleanupCardExecution(roomId: String, executionId: String) {
+        cardExecutionEngine.cleanupExecution(executionId)
+        rooms[roomId]?.activeCardExecution = null
+    }
+    
+    /**
+     * 获取玩家的WebSocket会话ID
+     */
+    fun getPlayerSession(playerId: String): String? {
+        // 这里需要实现玩家到会话ID的映射
+        // 暂时返回null，需要在WebSocket层面实现
+        return null
     }
 }

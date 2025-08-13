@@ -164,7 +164,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     
     fun playCard(cardId: String, targetIds: List<String> = emptyList()) {
         _uiState.value.currentPlayer?.let { player ->
-            sendMessage(ClientMessage.PlayCard(player.id, cardId, targetIds))
+            sendMessage(ClientMessage.PlayCardNew(player.id, cardId, targetIds))
         }
     }
     
@@ -187,7 +187,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             // 发送响应消息到服务器
-            sendMessage(ClientMessage.RespondToCard(player.id, responseCardId, accept))
+            sendMessage(ClientMessage.RespondToCardNew(player.id, responseCardId, accept))
         }
     }
     
@@ -580,6 +580,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     needsResponse = false,
                     responseType = null,
                     errorMessage = resultMessage
+                )
+            }
+
+            is ServerMessage.NullificationPhaseStarted -> {
+                // 无懈可击阶段开始，更新UI状态显示提示
+                val currentState = _uiState.value
+                _uiState.value = currentState.copy(
+                    gameRoom = message.room,
+                    errorMessage = "${message.casterName}使用了${message.cardName}，所有玩家可以使用无懈可击响应"
                 )
             }
         }

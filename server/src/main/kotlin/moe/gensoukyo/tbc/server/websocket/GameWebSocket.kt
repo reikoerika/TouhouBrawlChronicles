@@ -2,6 +2,7 @@ package moe.gensoukyo.tbc.server.websocket
 
 import io.ktor.server.routing.Route
 import io.ktor.server.websocket.webSocket
+import io.ktor.utils.io.printStack
 import io.ktor.websocket.Frame
 import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.readText
@@ -349,26 +350,51 @@ fun Route.gameWebSocket(gameService: GameService) {
                             }
 
                             is ClientMessage.PlayCardNew -> {
-                                val cardExecutionHandler = CardExecutionHandler(gameService)
-                                cardExecutionHandler.handlePlayCard(
-                                    PlayCardMessage(message.playerId, message.cardId, message.targetIds),
-                                    connections,
-                                    playerSessions,
-                                    spectatorSessions
+                                val cardExecutionHandler = CardExecutionHandler(
+                                    gameService = gameService,
+                                    playerSessions = playerSessions,
+                                    spectatorSessions = spectatorSessions
                                 )
+                                cardExecutionHandler.syncConnections(connections)
+                                val result = cardExecutionHandler.handlePlayCard(
+                                    PlayCardMessage(message.playerId, message.cardId, message.targetIds),
+                                    connections
+                                )
+                                
+                                if (result.isFailure) {
+                                    val playerId = message.playerId
+                                    val sessionId = playerSessions[playerId]
+                                    val session = connections[sessionId]
+                                    session?.send(Json.encodeToString<ServerMessage>(
+                                        ServerMessage.Error("卡牌执行失败: ${result.exceptionOrNull()?.message}")
+                                    ))
+                                }
                             }
                             is ClientMessage.RespondToCardNew -> {
-                                val cardExecutionHandler = CardExecutionHandler(gameService)
-                                cardExecutionHandler.handleResponse(
-                                    RespondToCardMessage(message.playerId, message.responseCardId, message.accept),
-                                    connections,
-                                    playerSessions,
-                                    spectatorSessions
+                                val cardExecutionHandler = CardExecutionHandler(
+                                    gameService = gameService,
+                                    playerSessions = playerSessions,
+                                    spectatorSessions = spectatorSessions
                                 )
+                                cardExecutionHandler.syncConnections(connections)
+                                val result = cardExecutionHandler.handleResponse(
+                                    RespondToCardMessage(message.playerId, message.responseCardId, message.accept),
+                                    connections
+                                )
+                                
+                                if (result.isFailure) {
+                                    val playerId = message.playerId
+                                    val sessionId = playerSessions[playerId]
+                                    val session = connections[sessionId]
+                                    session?.send(Json.encodeToString<ServerMessage>(
+                                        ServerMessage.Error("响应处理失败: ${result.exceptionOrNull()?.message}")
+                                    ))
+                                }
                             }
                         }
                     } catch (e: Exception) {
-                        send(Json.encodeToString<ServerMessage>(ServerMessage.Error("处理消息时发生错误: ${e.message}")))
+                        e.printStack()
+                        send(Json.encodeToString<ServerMessage>(Error("处理消息时发生错误: ${e.message}")))
                     }
                 }
             }

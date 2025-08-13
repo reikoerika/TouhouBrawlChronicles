@@ -204,6 +204,15 @@ sealed class ServerMessage {
         val availableOptions: List<ResponseOption>,
         val room: GameRoom
     ) : ServerMessage()
+    
+    @Serializable
+    data class NullificationPhaseStarted(
+        val executionId: String,
+        val cardName: String,
+        val casterName: String,
+        val targetPlayerIds: List<String>,
+        val room: GameRoom
+    ) : ServerMessage()
 }
 
 @Serializable

@@ -85,11 +85,11 @@ enum class TargetType {
 }
 
 @Serializable
-enum class Identity {
-    LORD,        // 主公
-    LOYALIST,    // 忠臣
-    REBEL,       // 反贼
-    SPY          // 内奸
+enum class Identity(val displayName: String) {
+    LORD("主公"),        // 主公
+    LOYALIST("忠臣"),    // 忠臣
+    REBEL("反贼"),       // 反贼
+    SPY("内奸")          // 内奸
 }
 
 @Serializable
@@ -156,7 +156,6 @@ data class GameRoom(
     val discardPile: MutableList<Card> = mutableListOf(),  // 弃牌堆
     var pendingResponse: PendingResponse? = null,  // 待处理的卡牌响应（旧系统）
     var lastAbundantHarvestSelections: Map<String, Card> = emptyMap(),  // 上次五谷丰登的选择记录
-    @kotlinx.serialization.Transient
     var activeCardExecution: CardExecutionContext? = null  // 当前卡牌执行上下文（新系统）
 ) {
     val currentPlayer: Player?

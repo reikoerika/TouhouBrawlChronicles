@@ -54,7 +54,8 @@ class CardExecutionEngine(
     fun handleNullificationResponse(
         executionId: String,
         responderId: String,
-        responseCard: Card?
+        responseCard: Card?,
+        room: GameRoom
     ): CardExecutionContext? {
         val context = activeExecutions[executionId] ?: return null
         
@@ -62,7 +63,7 @@ class CardExecutionEngine(
         
         val response = CardResponse(
             playerId = responderId,
-            playerName = "", // 需要从room获取
+            playerName = room.players.find { it.id == responderId }?.name ?: "未知",
             responseCard = responseCard,
             responseType = CardResponseType.NULLIFICATION
         )
@@ -78,8 +79,15 @@ class CardExecutionEngine(
                 message = "${context.card.name}被无懈可击阻挡"
             )
         } else {
-            // 进入结算阶段
-            context.phase = CardExecutionPhase.RESOLUTION
+            // 检查是否所有玩家都已响应
+            val alivePlayers = room.players.filter { it.health > 0 }
+            val respondedPlayers = context.responses.map { it.playerId }.toSet()
+            
+            if (alivePlayers.all { it.id in respondedPlayers }) {
+                // 所有玩家都已响应，进入结算阶段
+                context.phase = CardExecutionPhase.RESOLUTION
+            }
+            // 如果还有玩家未响应，保持在NULLIFICATION阶段
         }
         
         return context
@@ -162,21 +170,34 @@ class CardExecutionEngine(
     /**
      * 获取需要响应的玩家
      */
-    fun getResponseTarget(executionId: String): String? {
+    fun getResponseTarget(executionId: String, room: GameRoom): String? {
         val context = activeExecutions[executionId] ?: return null
         
         return when (context.phase) {
             CardExecutionPhase.NULLIFICATION -> {
-                // 返回第一个还未响应的目标
-                context.finalTargets.firstOrNull { target ->
-                    context.responses.none { it.playerId == target.id }
-                }?.id
+                // 无懈可击阶段：返回null表示所有玩家都可以同时响应
+                null
             }
             CardExecutionPhase.SPECIAL_EXECUTION -> {
                 // 根据特殊卡牌类型返回需要响应的玩家
                 getSpecialResponseTarget(context)
             }
             else -> null
+        }
+    }
+    
+    /**
+     * 获取无懈可击阶段所有可以响应的玩家
+     */
+    fun getAllNullificationTargets(executionId: String, room: GameRoom): List<String> {
+        val context = activeExecutions[executionId] ?: return emptyList()
+        
+        return if (context.phase == CardExecutionPhase.NULLIFICATION) {
+            val alivePlayers = room.players.filter { it.health > 0 }
+            val respondedPlayers = context.responses.map { it.playerId }.toSet()
+            alivePlayers.filter { it.id !in respondedPlayers }.map { it.id }
+        } else {
+            emptyList()
         }
     }
     
@@ -206,8 +227,8 @@ class CardExecutionEngine(
     }
     
     private fun needsNullificationCheck(card: Card, targets: List<Player>): Boolean {
-        // 锦囊牌且有目标时需要无懈可击检查
-        return card.type == CardType.TRICK && targets.isNotEmpty()
+        // 所有锦囊牌都需要无懈可击检查，不论是否有目标
+        return card.type == CardType.TRICK
     }
     
     private fun setupSpecialExecution(context: CardExecutionContext, room: GameRoom) {
