@@ -56,6 +56,7 @@ import moe.gensoukyo.tbc.shared.model.GameRoom
 import moe.gensoukyo.tbc.shared.model.GameState
 import moe.gensoukyo.tbc.shared.model.GamePhase
 import moe.gensoukyo.tbc.shared.model.Player
+import moe.gensoukyo.tbc.shared.model.TargetType
 import moe.gensoukyo.tbc.ui.theme.CardBackground
 import moe.gensoukyo.tbc.ui.theme.DamageRed
 import moe.gensoukyo.tbc.ui.theme.HealthGreen
@@ -819,6 +820,150 @@ fun EquipmentArea(
 }
 
 @Composable
+fun TargetSelector(
+    card: Card,
+    availableTargets: List<Player>,
+    currentPlayer: Player,
+    onTargetsSelected: (List<String>) -> Unit,
+    onCancel: () -> Unit
+) {
+    var selectedTargets by remember { mutableStateOf(emptySet<String>()) }
+    
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { 
+            Text("选择目标 - ${card.name}")
+        },
+        text = {
+            Column {
+                Text(
+                    text = "卡牌效果: ${card.effect}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                Text(
+                    text = when (card.targetType) {
+                        TargetType.SINGLE -> "选择一个目标"
+                        TargetType.MULTIPLE -> "选择一个或多个目标"
+                        TargetType.ALL_OTHERS -> "将对所有其他玩家生效"
+                        TargetType.ALL_PLAYERS -> "将对所有玩家生效"
+                        TargetType.NONE -> "无需选择目标"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                
+                if (card.targetType == TargetType.ALL_OTHERS) {
+                    // 自动选择所有其他玩家
+                    LaunchedEffect(Unit) {
+                        selectedTargets = availableTargets.filter { it.id != currentPlayer.id }.map { it.id }.toSet()
+                    }
+                } else if (card.targetType == TargetType.ALL_PLAYERS) {
+                    // 自动选择所有玩家
+                    LaunchedEffect(Unit) {
+                        selectedTargets = availableTargets.map { it.id }.toSet()
+                    }
+                }
+                
+                if (card.targetType == TargetType.SINGLE || card.targetType == TargetType.MULTIPLE) {
+                    LazyColumn(
+                        modifier = Modifier.height(200.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(availableTargets.filter { it.id != currentPlayer.id }) { target ->
+                            val isSelected = selectedTargets.contains(target.id)
+                            
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedTargets = if (card.targetType == TargetType.SINGLE) {
+                                            // 单目标，替换选择
+                                            setOf(target.id)
+                                        } else {
+                                            // 多目标，切换选择
+                                            if (isSelected) {
+                                                selectedTargets - target.id
+                                            } else {
+                                                selectedTargets + target.id
+                                            }
+                                        }
+                                    },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) TouhouGold.copy(alpha = 0.3f) 
+                                    else MaterialTheme.colorScheme.surface
+                                ),
+                                border = if (isSelected) BorderStroke(2.dp, TouhouGold) else null
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = target.name,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "生命: ${target.health}/${target.maxHealth}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                    
+                                    if (isSelected) {
+                                        Text(
+                                            text = "✓",
+                                            color = TouhouGold,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (availableTargets.filter { it.id != currentPlayer.id }.isEmpty()) {
+                    Text(
+                        text = "没有可用的目标",
+                        color = Color.Gray,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { 
+                    onTargetsSelected(selectedTargets.toList())
+                },
+                enabled = when (card.targetType) {
+                    TargetType.NONE -> true
+                    TargetType.SINGLE -> selectedTargets.size == 1
+                    TargetType.MULTIPLE -> selectedTargets.isNotEmpty()
+                    TargetType.ALL_OTHERS, TargetType.ALL_PLAYERS -> true
+                }
+            ) {
+                Text("确认")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@Composable
 fun CurrentPlayerActions(
     player: Player,
     gameRoom: GameRoom,
@@ -829,6 +974,9 @@ fun CurrentPlayerActions(
     onStartGame: () -> Unit,
     onEndTurn: (String) -> Unit
 ) {
+    var selectedCard by remember { mutableStateOf<Card?>(null) }
+    var showTargetSelector by remember { mutableStateOf(false) }
+    
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -964,11 +1112,41 @@ fun CurrentPlayerActions(
                 items(player.cards) { card ->
                     GameCard(
                         card = card,
-                        onClick = { onPlayCard(card.id, emptyList()) }
+                        onClick = { 
+                            when (card.targetType) {
+                                TargetType.NONE -> {
+                                    // 无目标卡牌直接使用
+                                    onPlayCard(card.id, emptyList())
+                                }
+                                else -> {
+                                    // 需要目标选择的卡牌
+                                    selectedCard = card
+                                    showTargetSelector = true
+                                }
+                            }
+                        }
                     )
                 }
             }
         }
+    }
+    
+    // 目标选择对话框
+    if (showTargetSelector && selectedCard != null) {
+        TargetSelector(
+            card = selectedCard!!,
+            availableTargets = gameRoom.players,
+            currentPlayer = player,
+            onTargetsSelected = { targetIds ->
+                onPlayCard(selectedCard!!.id, targetIds)
+                selectedCard = null
+                showTargetSelector = false
+            },
+            onCancel = {
+                selectedCard = null
+                showTargetSelector = false
+            }
+        )
     }
 }
 
@@ -1033,6 +1211,41 @@ fun GameCard(
                         color = Color.White,
                         fontSize = 12.sp
                     )
+                }
+                
+                // 显示目标类型提示
+                when (card.targetType) {
+                    TargetType.SINGLE -> {
+                        Text(
+                            text = "🎯",
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                    }
+                    TargetType.MULTIPLE -> {
+                        Text(
+                            text = "🎯+",
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                    }
+                    TargetType.ALL_OTHERS -> {
+                        Text(
+                            text = "🌟",
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                    }
+                    TargetType.NONE -> {
+                        // 无特殊标记
+                    }
+                    TargetType.ALL_PLAYERS -> {
+                        Text(
+                            text = "💫",
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                    }
                 }
             }
             
