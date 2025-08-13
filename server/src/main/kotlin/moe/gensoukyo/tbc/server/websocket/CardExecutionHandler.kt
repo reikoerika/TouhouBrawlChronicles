@@ -236,6 +236,7 @@ class CardExecutionHandler(
             return
         }
         
+        // 广播卡牌执行完成消息
         broadcastToRoom(roomId) {
             ServerMessage.CardExecutionCompleted(
                 executionId = context.id,
@@ -244,6 +245,11 @@ class CardExecutionHandler(
                 message = context.result?.message ?: "执行完成",
                 room = room
             )
+        }
+        
+        // 广播游戏状态更新以同步手牌变化
+        broadcastToRoom(roomId) {
+            ServerMessage.GameStateUpdate(room)
         }
         
         // 清理执行上下文

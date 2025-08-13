@@ -158,6 +158,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     
     fun playCard(cardId: String, targetIds: List<String> = emptyList()) {
         _uiState.value.currentPlayer?.let { player ->
+            // 立即从本地手牌中移除卡牌
+            val cardIndex = player.cards.indexOfFirst { it.id == cardId }
+            if (cardIndex != -1) {
+                val updatedCards = player.cards.toMutableList().apply {
+                    removeAt(cardIndex)
+                }
+                val updatedPlayer = player.copy(cards = updatedCards)
+                
+                // 更新本地状态
+                _uiState.value = _uiState.value.copy(
+                    currentPlayer = updatedPlayer
+                )
+            }
+            
+            // 发送出牌消息到服务器
             sendMessage(ClientMessage.PlayCard(player.id, cardId, targetIds))
         }
     }
@@ -232,8 +247,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             is ServerMessage.GameStateUpdate -> {
-                _uiState.value = _uiState.value.copy(
+                val currentState = _uiState.value
+                // 从更新后的房间中找到当前玩家并更新本地状态
+                val updatedCurrentPlayer = currentState.currentPlayer?.let { player ->
+                    message.room.players.find { it.id == player.id }
+                }
+                _uiState.value = currentState.copy(
                     gameRoom = message.room,
+                    currentPlayer = updatedCurrentPlayer ?: currentState.currentPlayer,
                     errorMessage = null
                 )
             }
