@@ -152,7 +152,8 @@ data class GameRoom(
     var gamePhase: GamePhase = GamePhase.DRAW,
     val currentTurnPlayedCards: MutableList<PlayedCard> = mutableListOf(),  // 当前回合出牌区
     val deck: MutableList<Card> = mutableListOf(),  // 牌堆
-    val discardPile: MutableList<Card> = mutableListOf()  // 弃牌堆
+    val discardPile: MutableList<Card> = mutableListOf(),  // 弃牌堆
+    var pendingResponse: PendingResponse? = null  // 待处理的卡牌响应
 ) {
     val currentPlayer: Player?
         get() = if (players.isNotEmpty() && currentPlayerIndex < players.size) 
@@ -172,3 +173,47 @@ enum class GamePhase {
     PLAY,       // 出牌阶段
     DISCARD     // 弃牌阶段
 }
+
+@Serializable
+enum class ResponseType {
+    DODGE,          // 闪避（对杀的响应）
+    NULLIFICATION,  // 无懈可击（对锦囊的响应）
+    DUEL_KILL,      // 决斗中出杀（决斗特有）
+    OPTIONAL        // 可选响应
+}
+
+@Serializable
+data class CardResponse(
+    val playerId: String,
+    val playerName: String,
+    val responseCard: Card?,
+    val accepted: Boolean,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Serializable
+data class CardResolutionResult(
+    val success: Boolean,
+    val blocked: Boolean = false,
+    val damage: Int = 0,
+    val healing: Int = 0,
+    val message: String = ""
+)
+
+@Serializable
+data class PendingResponse(
+    var targetPlayerId: String,
+    val originalCard: Card,
+    val originalPlayerId: String,
+    val responseType: ResponseType,
+    val responses: MutableList<CardResponse> = mutableListOf(),
+    val timeoutMs: Long = 15000,
+    val startTime: Long = System.currentTimeMillis(),
+    // 决斗专用字段
+    var isDuel: Boolean = false,
+    var duelCurrentPlayer: String? = null,  // 当前需要出杀的玩家
+    var duelKillCount: Int = 0,  // 已经出的杀的数量
+    var duelInitiator: String? = null,  // 决斗发起者
+    var duelTarget: String? = null,  // 决斗目标
+    var duelFinished: Boolean = false  // 决斗是否结束
+)

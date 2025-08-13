@@ -149,9 +149,21 @@ fun GameScreen(viewModel: GameViewModel) {
                     onPlayCard = { cardId, targetIds -> viewModel.playCard(cardId, targetIds) },
                     onStartGame = { viewModel.startGame(uiState.gameRoom!!.id) },
                     onEndTurn = { playerId -> viewModel.endTurn(playerId) },
-                    onAdjustOrder = { newOrder -> viewModel.adjustPlayerOrder(uiState.gameRoom!!.id, newOrder) }
+                    onAdjustOrder = { newOrder -> viewModel.adjustPlayerOrder(uiState.gameRoom!!.id, newOrder) },
+                    onRespondToCard = { responseCardId, accept -> viewModel.respondToCard(responseCardId, accept) }
                 )
             }
+        }
+        
+        // 响应对话框
+        if (uiState.needsResponse && uiState.currentPlayer != null) {
+            CardResponseDialog(
+                currentPlayer = uiState.currentPlayer!!,
+                responseMessage = uiState.errorMessage ?: "需要响应卡牌",
+                responseType = uiState.responseType,
+                onRespond = { responseCardId -> viewModel.respondToCard(responseCardId, true) },
+                onDecline = { viewModel.respondToCard(null, false) }
+            )
         }
     }
     
@@ -426,7 +438,8 @@ fun GameRoomScreen(
     onPlayCard: (String, List<String>) -> Unit,
     onStartGame: () -> Unit,
     onEndTurn: (String) -> Unit,
-    onAdjustOrder: (List<String>) -> Unit
+    onAdjustOrder: (List<String>) -> Unit,
+    onRespondToCard: (String?, Boolean) -> Unit
 ) {
     var showGameInfo by remember { mutableStateOf(false) }
     var showPlayerOrder by remember { mutableStateOf(false) }
@@ -1554,7 +1567,8 @@ fun GameRoomScreenPreview() {
             onPlayCard = { _, _ -> },
             onStartGame = {},
             onEndTurn = { _ -> },
-            onAdjustOrder = { _ -> }
+            onAdjustOrder = { _ -> },
+            onRespondToCard = { _, _ -> }
         )
     }
 }
@@ -2143,6 +2157,108 @@ fun PlayedCardsHistoryDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("关闭")
+            }
+        }
+    )
+}
+
+@Composable
+fun CardResponseDialog(
+    currentPlayer: Player,
+    responseMessage: String,
+    responseType: moe.gensoukyo.tbc.shared.model.ResponseType? = null,
+    onRespond: (String) -> Unit,
+    onDecline: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDecline,
+        title = { 
+            Text("卡牌响应", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column {
+                Text(
+                    text = responseMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                Text(
+                    text = "选择响应卡牌:",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                
+                // 根据响应类型显示对应的响应卡牌
+                val responseCards = currentPlayer.cards.filter { card ->
+                    when (responseType) {
+                        moe.gensoukyo.tbc.shared.model.ResponseType.DODGE -> card.name == "闪"
+                        moe.gensoukyo.tbc.shared.model.ResponseType.NULLIFICATION -> card.name == "无懈可击"
+                        moe.gensoukyo.tbc.shared.model.ResponseType.DUEL_KILL -> card.name == "杀"
+                        else -> card.name == "闪" || card.name == "无懈可击" || card.name == "杀"
+                    }
+                }
+                
+                if (responseCards.isNotEmpty()) {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(responseCards) { card ->
+                            Card(
+                                modifier = Modifier
+                                    .width(80.dp)
+                                    .height(100.dp)
+                                    .clickable { onRespond(card.id) },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = when (card.name) {
+                                        "闪" -> TouhouBlue.copy(alpha = 0.8f)
+                                        "无懈可击" -> TouhouGold.copy(alpha = 0.8f)
+                                        "杀" -> DamageRed.copy(alpha = 0.8f)
+                                        else -> Color.Gray.copy(alpha = 0.8f)
+                                    }
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = card.name,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = when (responseType) {
+                            moe.gensoukyo.tbc.shared.model.ResponseType.DODGE -> "没有闪可以响应"
+                            moe.gensoukyo.tbc.shared.model.ResponseType.NULLIFICATION -> "没有无懈可击可以响应"
+                            moe.gensoukyo.tbc.shared.model.ResponseType.DUEL_KILL -> "没有杀可以出牌"
+                            else -> "没有可用的响应卡牌"
+                        },
+                        color = Color.Gray,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDecline) {
+                Text("不响应", color = Color.Gray)
             }
         }
     )

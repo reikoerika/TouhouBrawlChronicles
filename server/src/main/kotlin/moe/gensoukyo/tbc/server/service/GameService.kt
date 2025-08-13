@@ -339,7 +339,7 @@ class GameService {
         return room
     }
     
-    fun playCard(roomId: String, playerId: String, cardId: String, targetIds: List<String> = emptyList()): PlayedCard? {
+    fun playCard(roomId: String, playerId: String, cardId: String, targetIds: List<String> = emptyList()): Pair<PlayedCard?, PendingResponse?>? {
         val room = rooms[roomId] ?: return null
         val player = room.players.find { it.id == playerId } ?: return null
         val cardIndex = player.cards.indexOfFirst { it.id == cardId }
@@ -353,6 +353,76 @@ class GameService {
             room.players.find { it.id == targetId } 
         }
         
+        // 检查是否需要响应
+        val needsResponse = checkIfNeedsResponse(card, targets)
+        
+        if (needsResponse.isNotEmpty()) {
+            // 需要响应，创建待处理响应
+            val target = needsResponse.first()
+            val responseType = determineResponseType(card)
+            
+            val pendingResponse = PendingResponse(
+                targetPlayerId = target.id,
+                originalCard = card,
+                originalPlayerId = playerId,
+                responseType = responseType,
+                isDuel = card.name == "决斗",
+                duelCurrentPlayer = if (card.name == "决斗") target.id else null,
+                duelInitiator = if (card.name == "决斗") playerId else null,
+                duelTarget = if (card.name == "决斗") target.id else null
+            )
+            
+            room.pendingResponse = pendingResponse
+            
+            // 从手牌移除但暂不进入弃牌堆，等响应完成后处理
+            player.cards.removeAt(cardIndex)
+            
+            // 创建出牌记录
+            val playedCard = PlayedCard(
+                card = card,
+                playerId = playerId,
+                playerName = player.name,
+                turnNumber = room.turnCount,
+                targetIds = targetIds
+            )
+            
+            return Pair(playedCard, pendingResponse)
+        } else {
+            // 不需要响应，直接处理效果
+            return handleCardDirectly(room, player, cardIndex, card, targets, targetIds)
+        }
+    }
+    
+    private fun checkIfNeedsResponse(card: Card, targets: List<Player>): List<Player> {
+        return when (card.name) {
+            "杀" -> targets // 杀需要目标响应闪
+            "决斗" -> targets // 决斗是基本牌，需要目标响应杀或闪
+            else -> when (card.type) {
+                CardType.TRICK -> targets // 锦囊牌可能需要无懈可击
+                else -> emptyList()
+            }
+        }
+    }
+    
+    private fun determineResponseType(card: Card): ResponseType {
+        return when (card.name) {
+            "杀" -> ResponseType.DODGE  // 杀只能用闪响应
+            "决斗" -> ResponseType.DUEL_KILL  // 决斗需要用杀响应
+            else -> when (card.type) {
+                CardType.TRICK -> ResponseType.NULLIFICATION  // 锦囊牌用无懈可击响应
+                else -> ResponseType.OPTIONAL
+            }
+        }
+    }
+    
+    private fun handleCardDirectly(
+        room: GameRoom, 
+        player: Player, 
+        cardIndex: Int, 
+        card: Card, 
+        targets: List<Player>, 
+        targetIds: List<String>
+    ): Pair<PlayedCard?, PendingResponse?> {
         // 处理卡牌效果
         val effectResult = when (card.type) {
             CardType.BASIC -> cardEffectService.handleBasicCard(card, player, targets, room)
@@ -361,7 +431,7 @@ class GameService {
         }
         
         if (!effectResult.success) {
-            return null
+            return Pair(null, null)
         }
         
         // 从手牌中移除
@@ -376,17 +446,17 @@ class GameService {
         if (effectResult.drawCards > 0) {
             if (effectResult.affectAllPlayers) {
                 room.players.forEach { p ->
-                    drawCard(roomId, p.id, effectResult.drawCards)
+                    drawCard(room.id, p.id, effectResult.drawCards)
                 }
             } else {
-                drawCard(roomId, playerId, effectResult.drawCards)
+                drawCard(room.id, player.id, effectResult.drawCards)
             }
         }
         
         // 创建出牌记录
         val playedCard = PlayedCard(
             card = card,
-            playerId = playerId,
+            playerId = player.id,
             playerName = player.name,
             turnNumber = room.turnCount,
             targetIds = targetIds
@@ -398,6 +468,167 @@ class GameService {
         // 添加到当前回合的出牌区
         room.currentTurnPlayedCards.add(playedCard)
         
-        return playedCard
+        return Pair(playedCard, null)
+    }
+    
+    fun respondToCard(roomId: String, playerId: String, responseCardId: String?, accept: Boolean): CardResolutionResult? {
+        val room = rooms[roomId] ?: return null
+        val pendingResponse = room.pendingResponse ?: return null
+        val respondingPlayer = room.players.find { it.id == playerId } ?: return null
+        
+        // 验证是否是正确的响应者
+        if (playerId != pendingResponse.targetPlayerId && (!pendingResponse.isDuel || playerId != pendingResponse.duelCurrentPlayer)) {
+            return null
+        }
+        
+        var responseCard: Card? = null
+        if (responseCardId != null) {
+            val cardIndex = respondingPlayer.cards.indexOfFirst { it.id == responseCardId }
+            if (cardIndex != -1) {
+                responseCard = respondingPlayer.cards[cardIndex]
+                // 验证响应卡牌是否有效
+                if (isValidResponse(responseCard, pendingResponse.responseType)) {
+                    respondingPlayer.cards.removeAt(cardIndex)
+                    room.discardPile.add(responseCard)
+                }
+            }
+        }
+        
+        // 记录响应
+        val cardResponse = CardResponse(
+            playerId = playerId,
+            playerName = respondingPlayer.name,
+            responseCard = responseCard,
+            accepted = accept && responseCard != null
+        )
+        
+        pendingResponse.responses.add(cardResponse)
+        
+        // 处理决斗的特殊逻辑
+        if (pendingResponse.isDuel) {
+            return handleDuelResponse(room, pendingResponse, cardResponse)
+        } else {
+            // 普通卡牌响应，解析最终结果
+            val result = resolveCardEffect(room, pendingResponse, cardResponse)
+            
+            // 清除待处理响应
+            room.pendingResponse = null
+            
+            // 将原始卡牌加入弃牌堆（如果不是装备）
+            if (pendingResponse.originalCard.type != CardType.EQUIPMENT) {
+                room.discardPile.add(pendingResponse.originalCard)
+            }
+            
+            return result
+        }
+    }
+    
+    private fun handleDuelResponse(room: GameRoom, pendingResponse: PendingResponse, response: CardResponse): CardResolutionResult? {
+        val duelInitiator = room.players.find { it.id == pendingResponse.duelInitiator!! }
+        val duelTarget = room.players.find { it.id == pendingResponse.duelTarget!! }
+        
+        if (duelInitiator == null || duelTarget == null) {
+            return CardResolutionResult(success = false, message = "决斗参与者不存在")
+        }
+        
+        if (response.accepted && response.responseCard?.name == "杀") {
+            // 成功出杀，增加计数并切换到另一方
+            pendingResponse.duelKillCount++
+            
+            // 切换当前出杀的玩家
+            pendingResponse.duelCurrentPlayer = if (pendingResponse.duelCurrentPlayer == duelTarget.id) {
+                pendingResponse.duelInitiator
+            } else {
+                pendingResponse.duelTarget
+            }
+            
+            // 更新targetPlayerId为当前需要出杀的玩家
+            pendingResponse.targetPlayerId = pendingResponse.duelCurrentPlayer!!
+            
+            // 返回继续决斗的结果
+            val currentPlayerName = room.players.find { it.id == pendingResponse.duelCurrentPlayer }?.name ?: "未知"
+            return CardResolutionResult(
+                success = true,
+                blocked = false,
+                message = "${response.playerName}出了杀，轮到${currentPlayerName}出杀"
+            )
+        } else {
+            // 没有出杀或拒绝出杀，决斗结束
+            pendingResponse.duelFinished = true
+            
+            // 不出杀的一方受到1点伤害
+            val loserPlayer = room.players.find { it.id == response.playerId }!!
+            loserPlayer.health = maxOf(0, loserPlayer.health - 1)
+            
+            val winnerPlayer = room.players.find {
+                it.id != response.playerId && (it.id == pendingResponse.duelInitiator || it.id == pendingResponse.duelTarget) 
+            }!!
+            
+            // 清除待处理响应
+            room.pendingResponse = null
+            
+            // 将决斗卡牌加入弃牌堆
+            room.discardPile.add(pendingResponse.originalCard)
+            
+            // 检查玩家是否死亡
+            val gameResult = if (loserPlayer.health <= 0) {
+                "决斗结束，${loserPlayer.name}没有出杀，受到1点伤害并死亡"
+            } else {
+                "决斗结束，${loserPlayer.name}没有出杀，受到1点伤害"
+            }
+            
+            return CardResolutionResult(
+                success = true,
+                blocked = false,
+                damage = 1,
+                message = gameResult
+            )
+        }
+    }
+    
+    private fun isValidResponse(responseCard: Card, responseType: ResponseType): Boolean {
+        return when (responseType) {
+            ResponseType.DODGE -> responseCard.name == "闪"
+            ResponseType.NULLIFICATION -> responseCard.name == "无懈可击"
+            ResponseType.DUEL_KILL -> responseCard.name == "杀"
+            ResponseType.OPTIONAL -> true
+        }
+    }
+    
+    private fun resolveCardEffect(room: GameRoom, pendingResponse: PendingResponse, response: CardResponse): CardResolutionResult {
+        val originalCard = pendingResponse.originalCard
+        val targets = listOfNotNull(room.players.find { it.id == pendingResponse.targetPlayerId })
+        val originalPlayer = room.players.find { it.id == pendingResponse.originalPlayerId }
+        
+        return when {
+            response.accepted && response.responseCard != null -> {
+                // 响应成功，卡牌效果被阻挡
+                CardResolutionResult(
+                    success = false,
+                    blocked = true,
+                    message = "${response.playerName}使用${response.responseCard!!.name}成功阻挡了${originalCard.name}"
+                )
+            }
+            else -> {
+                // 没有响应或响应失败，执行原始效果
+                if (originalPlayer != null) {
+                    val effectResult = when (originalCard.type) {
+                        CardType.BASIC -> cardEffectService.handleBasicCard(originalCard, originalPlayer, targets, room)
+                        CardType.TRICK -> cardEffectService.handleTrickCard(originalCard, originalPlayer, targets, room)
+                        CardType.EQUIPMENT -> cardEffectService.handleEquipmentCard(originalCard, originalPlayer, room)
+                    }
+                    
+                    CardResolutionResult(
+                        success = effectResult.success,
+                        blocked = false,
+                        damage = if (originalCard.damage > 0) originalCard.damage else 0,
+                        healing = if (originalCard.healing > 0) originalCard.healing else 0,
+                        message = "${originalCard.name}生效"
+                    )
+                } else {
+                    CardResolutionResult(success = false, message = "原始玩家不存在")
+                }
+            }
+        }
     }
 }

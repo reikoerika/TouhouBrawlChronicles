@@ -12,6 +12,8 @@ import kotlinx.serialization.json.Json
 import moe.gensoukyo.tbc.server.service.GameService
 import moe.gensoukyo.tbc.shared.messages.ClientMessage
 import moe.gensoukyo.tbc.shared.messages.ServerMessage
+import moe.gensoukyo.tbc.shared.model.Card
+import moe.gensoukyo.tbc.shared.model.CardType
 import java.util.concurrent.ConcurrentHashMap
 
 fun Route.gameWebSocket(gameService: GameService) {
@@ -183,11 +185,97 @@ fun Route.gameWebSocket(gameService: GameService) {
                                 val roomId = findPlayerRoom(gameService, playerId)
                                 
                                 if (roomId != null) {
-                                    val playedCard = gameService.playCard(roomId, playerId, message.cardId, message.targetIds)
-                                    if (playedCard != null) {
+                                    val result = gameService.playCard(roomId, playerId, message.cardId, message.targetIds)
+                                    if (result != null) {
+                                        val (playedCard, pendingResponse) = result
                                         val room = gameService.getRoom(roomId)!!
-                                        broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
-                                            ServerMessage.CardPlayed(playedCard, room)
+                                        
+                                        if (pendingResponse != null) {
+                                            // 需要响应，先广播出牌消息
+                                            if (playedCard != null) {
+                                                broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
+                                                    ServerMessage.CardPlayed(playedCard, room)
+                                                }
+                                            }
+                                            
+                                            // 然后向目标玩家发送响应请求
+                                            val targetSessionId = playerSessions[pendingResponse.targetPlayerId]
+                                            val targetSession = connections[targetSessionId]
+                                            targetSession?.send(
+                                                Json.encodeToString<ServerMessage>(
+                                                    ServerMessage.CardResponseRequired(
+                                                        targetPlayerId = pendingResponse.targetPlayerId,
+                                                        originalCard = pendingResponse.originalCard,
+                                                        originalPlayer = room.players.find { it.id == pendingResponse.originalPlayerId }?.name ?: "未知",
+                                                        responseType = pendingResponse.responseType
+                                                    )
+                                                )
+                                            )
+                                        } else if (playedCard != null) {
+                                            // 不需要响应，直接广播结果
+                                            broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
+                                                ServerMessage.CardPlayed(playedCard, room)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            is ClientMessage.RespondToCard -> {
+                                val playerId = message.playerId
+                                val roomId = findPlayerRoom(gameService, playerId)
+                                
+                                if (roomId != null) {
+                                    val result = gameService.respondToCard(roomId, playerId, message.responseCardId, message.accept)
+                                    if (result != null) {
+                                        val room = gameService.getRoom(roomId)!!
+                                        
+                                        // 检查是否还有待处理的响应（决斗继续）
+                                        val stillPending = room.pendingResponse != null && !room.pendingResponse!!.duelFinished
+                                        
+                                        if (stillPending) {
+                                            // 决斗继续，向下一个玩家发送响应请求
+                                            val pendingResponse = room.pendingResponse!!
+                                            val nextPlayerSessionId = playerSessions[pendingResponse.duelCurrentPlayer!!]
+                                            val nextPlayerSession = connections[nextPlayerSessionId]
+                                            
+                                            nextPlayerSession?.send(
+                                                Json.encodeToString<ServerMessage>(
+                                                    ServerMessage.CardResponseRequired(
+                                                        targetPlayerId = pendingResponse.duelCurrentPlayer!!,
+                                                        originalCard = pendingResponse.originalCard,
+                                                        originalPlayer = room.players.find { it.id == pendingResponse.duelInitiator }?.name ?: "未知",
+                                                        responseType = pendingResponse.responseType,
+                                                        timeoutMs = pendingResponse.timeoutMs
+                                                    )
+                                                )
+                                            )
+                                            
+                                            // 广播中间结果给所有人
+                                            broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
+                                                ServerMessage.CardResponseReceived(
+                                                    playerId = playerId,
+                                                    responseCard = room.players.find { it.id == playerId }?.let { player ->
+                                                        message.responseCardId?.let { cardId ->
+                                                            null // 简化处理
+                                                        }
+                                                    },
+                                                    accepted = message.accept,
+                                                    room = room
+                                                )
+                                            }
+                                        } else {
+                                            // 决斗结束或其他响应完成，广播最终结果
+                                            broadcastToRoom(connections, playerSessions, spectatorSessions, roomId, room, gameService) {
+                                                ServerMessage.CardResolved(
+                                                    originalCard = result.let {
+                                                        Card("", "决斗", CardType.TRICK, "")
+                                                    },
+                                                    responses = emptyList(),
+                                                    result = result,
+                                                    room = room
+                                                )
+                                            }
                                         }
                                     }
                                 }

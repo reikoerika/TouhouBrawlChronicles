@@ -166,6 +166,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
+    fun respondToCard(responseCardId: String?, accept: Boolean = false) {
+        _uiState.value.currentPlayer?.let { player ->
+            // 如果接受响应且有响应卡牌，立即从本地手牌中移除
+            if (accept && responseCardId != null) {
+                val cardIndex = player.cards.indexOfFirst { it.id == responseCardId }
+                if (cardIndex != -1) {
+                    val updatedCards = player.cards.toMutableList().apply {
+                        removeAt(cardIndex)
+                    }
+                    val updatedPlayer = player.copy(cards = updatedCards)
+                    
+                    // 更新本地状态
+                    _uiState.value = _uiState.value.copy(
+                        currentPlayer = updatedPlayer
+                    )
+                }
+            }
+            
+            // 发送响应消息到服务器
+            sendMessage(ClientMessage.RespondToCard(player.id, responseCardId, accept))
+        }
+    }
+    
     private fun sendMessage(message: ClientMessage) {
         viewModelScope.launch {
             try {
@@ -319,6 +342,86 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             
+            is ServerMessage.CardResponseRequired -> {
+                val currentState = _uiState.value
+                if (currentState.currentPlayer?.id == message.targetPlayerId) {
+                    // 当前玩家需要响应
+                    val responseMessage = when (message.responseType) {
+                        moe.gensoukyo.tbc.shared.model.ResponseType.DODGE -> "需要出闪响应${message.originalPlayer}的${message.originalCard.name}"
+                        moe.gensoukyo.tbc.shared.model.ResponseType.NULLIFICATION -> "是否使用无懈可击响应${message.originalCard.name}"
+                        moe.gensoukyo.tbc.shared.model.ResponseType.DUEL_KILL -> {
+                            val killCount = currentState.gameRoom?.pendingResponse?.duelKillCount ?: 0
+                            "决斗第${killCount + 1}回合：需要出杀响应${message.originalPlayer}"
+                        }
+                        moe.gensoukyo.tbc.shared.model.ResponseType.OPTIONAL -> "是否响应${message.originalCard.name}"
+                    }
+                    
+                    _uiState.value = currentState.copy(
+                        needsResponse = true,
+                        errorMessage = responseMessage,
+                        responseTimeoutMs = message.timeoutMs,
+                        responseType = message.responseType
+                    )
+                } else {
+                    // 其他玩家收到响应通知
+                    _uiState.value = currentState.copy(
+                        errorMessage = "等待玩家响应${message.originalCard.name}..."
+                    )
+                }
+            }
+            
+            is ServerMessage.CardResponseReceived -> {
+                val currentState = _uiState.value
+                
+                // 更新当前玩家信息（从服务器返回的房间状态中获取）
+                val updatedCurrentPlayer = message.room.players.find { it.id == currentState.currentPlayer?.id }
+                
+                // 如果这是决斗中间步骤，保持响应状态（等待下一轮）
+                if (message.room.pendingResponse != null && !message.room.pendingResponse!!.duelFinished) {
+                    _uiState.value = currentState.copy(
+                        gameRoom = message.room,
+                        currentPlayer = updatedCurrentPlayer ?: currentState.currentPlayer,
+                        needsResponse = currentState.currentPlayer?.id == message.room.pendingResponse!!.duelCurrentPlayer,
+                        responseType = if (currentState.currentPlayer?.id == message.room.pendingResponse!!.duelCurrentPlayer) {
+                            message.room.pendingResponse!!.responseType
+                        } else null,
+                        errorMessage = if (message.accepted) {
+                            "玩家${message.room.players.find { it.id == message.playerId }?.name}出了杀"
+                        } else {
+                            "玩家${message.room.players.find { it.id == message.playerId }?.name}选择不出杀"
+                        }
+                    )
+                } else {
+                    // 普通响应或决斗已结束
+                    _uiState.value = currentState.copy(
+                        gameRoom = message.room,
+                        currentPlayer = updatedCurrentPlayer ?: currentState.currentPlayer,
+                        needsResponse = false,
+                        responseType = null,
+                        errorMessage = if (message.accepted) {
+                            "玩家${message.room.players.find { it.id == message.playerId }?.name}成功响应"
+                        } else {
+                            "玩家${message.room.players.find { it.id == message.playerId }?.name}选择不响应"
+                        }
+                    )
+                }
+            }
+            
+            is ServerMessage.CardResolved -> {
+                val currentState = _uiState.value
+                
+                // 更新当前玩家信息（从服务器返回的房间状态中获取）
+                val updatedCurrentPlayer = message.room.players.find { it.id == currentState.currentPlayer?.id }
+                
+                _uiState.value = currentState.copy(
+                    gameRoom = message.room,
+                    currentPlayer = updatedCurrentPlayer ?: currentState.currentPlayer,
+                    needsResponse = false,
+                    responseType = null,
+                    errorMessage = message.result.message
+                )
+            }
+            
             is ServerMessage.Error -> {
                 _uiState.value = _uiState.value.copy(errorMessage = message.message)
             }
@@ -339,7 +442,11 @@ data class GameUiState(
     val currentPlayer: Player? = null,
     val currentSpectator: Spectator? = null,
     val isSpectating: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val pendingResponse: moe.gensoukyo.tbc.shared.model.PendingResponse? = null,
+    val needsResponse: Boolean = false,
+    val responseTimeoutMs: Long = 15000,
+    val responseType: moe.gensoukyo.tbc.shared.model.ResponseType? = null
 )
 
 enum class ConnectionState {
