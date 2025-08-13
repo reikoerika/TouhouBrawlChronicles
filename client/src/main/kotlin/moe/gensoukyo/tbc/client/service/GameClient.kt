@@ -104,6 +104,42 @@ class GameClient {
                 }
             }
             
+            is ServerMessage.AbundantHarvestStarted -> {
+                println("\\n五谷丰登开始！")
+                println("可选择的卡牌：")
+                message.availableCards.forEachIndexed { index, card ->
+                    println("${index + 1}. ${card.name} - ${card.effect}")
+                }
+                val alivePlayers = message.room.players.filter { it.health > 0 }
+                val currentPlayer = alivePlayers[message.currentPlayerIndex]
+                println("当前选择玩家：${currentPlayer.name}")
+            }
+            
+            is ServerMessage.AbundantHarvestSelection -> {
+                if (currentPlayer?.id == message.playerId) {
+                    println("\\n轮到你选择卡牌了！")
+                    println("可选择的卡牌：")
+                    message.availableCards.forEachIndexed { index, card ->
+                        println("${index + 1}. ${card.name} - ${card.effect}")
+                    }
+                    selectAbundantHarvestCard(message.availableCards)
+                } else {
+                    println("\\n等待${message.playerName}选择卡牌...")
+                }
+            }
+            
+            is ServerMessage.AbundantHarvestCardSelected -> {
+                println("\\n${message.playerName}选择了${message.selectedCard.name}")
+            }
+            
+            is ServerMessage.AbundantHarvestCompleted -> {
+                println("\\n五谷丰登完成！所有玩家选择结果：")
+                message.selections.forEach { (playerId, card) ->
+                    val player = message.room.players.find { it.id == playerId }
+                    println("${player?.name}: ${card.name}")
+                }
+            }
+
             is ServerMessage.Error -> {
                 println("\\n错误: ${message.message}")
             }
@@ -262,5 +298,20 @@ class GameClient {
             if (card.damage > 0) println("   伤害: ${card.damage}")
             if (card.healing > 0) println("   回复: ${card.healing}")
         }
+    }
+    
+    private suspend fun selectAbundantHarvestCard(availableCards: List<moe.gensoukyo.tbc.shared.model.Card>) {
+        print("选择要获得的卡牌 (输入序号): ")
+        val choice = readlnOrNull()?.toIntOrNull()
+        
+        if (choice == null || choice < 1 || choice > availableCards.size) {
+            println("无效选择")
+            return
+        }
+        
+        val selectedCard = availableCards[choice - 1]
+        val playerId = currentPlayer?.id ?: return
+        val message = ClientMessage.SelectAbundantHarvestCard(playerId, selectedCard.id)
+        session?.send(Json.encodeToString<ClientMessage>(message))
     }
 }

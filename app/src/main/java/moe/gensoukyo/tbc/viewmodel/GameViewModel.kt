@@ -189,6 +189,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
+    fun selectAbundantHarvestCard(selectedCardId: String) {
+        _uiState.value.currentPlayer?.let { player ->
+            sendMessage(ClientMessage.SelectAbundantHarvestCard(player.id, selectedCardId))
+        }
+    }
+    
     private fun sendMessage(message: ClientMessage) {
         viewModelScope.launch {
             try {
@@ -353,6 +359,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                             val killCount = currentState.gameRoom?.pendingResponse?.duelKillCount ?: 0
                             "决斗第${killCount + 1}回合：需要出杀响应${message.originalPlayer}"
                         }
+                        moe.gensoukyo.tbc.shared.model.ResponseType.ABUNDANT_HARVEST -> "请选择一张卡牌"
                         moe.gensoukyo.tbc.shared.model.ResponseType.OPTIONAL -> "是否响应${message.originalCard.name}"
                     }
                     
@@ -422,6 +429,79 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             
+            is ServerMessage.AbundantHarvestStarted -> {
+                val currentState = _uiState.value
+                _uiState.value = currentState.copy(
+                    gameRoom = message.room,
+                    isAbundantHarvestActive = true,
+                    abundantHarvestAvailableCards = message.availableCards,
+                    abundantHarvestCurrentPlayerIndex = message.currentPlayerIndex,
+                    errorMessage = "五谷丰登开始！等待玩家选择卡牌..."
+                )
+            }
+            
+            is ServerMessage.AbundantHarvestSelection -> {
+                val currentState = _uiState.value
+                if (currentState.currentPlayer?.id == message.playerId) {
+                    // 当前玩家需要选择卡牌
+                    _uiState.value = currentState.copy(
+                        gameRoom = message.room,
+                        abundantHarvestAvailableCards = message.availableCards,
+                        needsResponse = true,
+                        responseType = moe.gensoukyo.tbc.shared.model.ResponseType.ABUNDANT_HARVEST,
+                        errorMessage = "轮到你选择卡牌了！"
+                    )
+                } else {
+                    // 其他玩家等待
+                    _uiState.value = currentState.copy(
+                        gameRoom = message.room,
+                        abundantHarvestAvailableCards = message.availableCards,
+                        errorMessage = "等待${message.playerName}选择卡牌..."
+                    )
+                }
+            }
+            
+            is ServerMessage.AbundantHarvestCardSelected -> {
+                val currentState = _uiState.value
+                
+                // 如果是当前玩家选择了卡牌，需要将卡牌添加到手牌中
+                val updatedCurrentPlayer = if (currentState.currentPlayer?.id == message.playerId) {
+                    val updatedCards = currentState.currentPlayer.cards.toMutableList().apply {
+                        add(message.selectedCard)
+                    }
+                    currentState.currentPlayer.copy(cards = updatedCards)
+                } else {
+                    currentState.currentPlayer
+                }
+                
+                _uiState.value = currentState.copy(
+                    gameRoom = message.room,
+                    currentPlayer = updatedCurrentPlayer,
+                    abundantHarvestAvailableCards = message.remainingCards,
+                    needsResponse = false,
+                    responseType = null,
+                    errorMessage = "${message.playerName}选择了${message.selectedCard.name}"
+                )
+            }
+            
+            is ServerMessage.AbundantHarvestCompleted -> {
+                val currentState = _uiState.value
+                
+                // 更新当前玩家信息（从服务器返回的房间状态中获取）
+                val updatedCurrentPlayer = message.room.players.find { it.id == currentState.currentPlayer?.id }
+                
+                _uiState.value = currentState.copy(
+                    gameRoom = message.room,
+                    currentPlayer = updatedCurrentPlayer ?: currentState.currentPlayer,
+                    isAbundantHarvestActive = false,
+                    abundantHarvestAvailableCards = emptyList(),
+                    abundantHarvestCurrentPlayerIndex = 0,
+                    needsResponse = false,
+                    responseType = null,
+                    errorMessage = "五谷丰登完成！所有玩家都已选择卡牌"
+                )
+            }
+
             is ServerMessage.Error -> {
                 _uiState.value = _uiState.value.copy(errorMessage = message.message)
             }
@@ -446,7 +526,11 @@ data class GameUiState(
     val pendingResponse: moe.gensoukyo.tbc.shared.model.PendingResponse? = null,
     val needsResponse: Boolean = false,
     val responseTimeoutMs: Long = 15000,
-    val responseType: moe.gensoukyo.tbc.shared.model.ResponseType? = null
+    val responseType: moe.gensoukyo.tbc.shared.model.ResponseType? = null,
+    // 五谷丰登相关状态
+    val abundantHarvestAvailableCards: List<moe.gensoukyo.tbc.shared.model.Card> = emptyList(),
+    val isAbundantHarvestActive: Boolean = false,
+    val abundantHarvestCurrentPlayerIndex: Int = 0
 )
 
 enum class ConnectionState {
