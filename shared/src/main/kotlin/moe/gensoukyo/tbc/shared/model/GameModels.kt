@@ -153,8 +153,10 @@ data class GameRoom(
     val currentTurnPlayedCards: MutableList<PlayedCard> = mutableListOf(),  // 当前回合出牌区
     val deck: MutableList<Card> = mutableListOf(),  // 牌堆
     val discardPile: MutableList<Card> = mutableListOf(),  // 弃牌堆
-    var pendingResponse: PendingResponse? = null,  // 待处理的卡牌响应
-    var lastAbundantHarvestSelections: Map<String, Card> = emptyMap()  // 上次五谷丰登的选择记录
+    var pendingResponse: PendingResponse? = null,  // 待处理的卡牌响应（旧系统）
+    var lastAbundantHarvestSelections: Map<String, Card> = emptyMap(),  // 上次五谷丰登的选择记录
+    @kotlinx.serialization.Transient
+    var activeCardExecution: moe.gensoukyo.tbc.server.card.CardExecutionContext? = null  // 当前卡牌执行上下文（新系统）
 ) {
     val currentPlayer: Player?
         get() = if (players.isNotEmpty() && currentPlayerIndex < players.size) 

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"fun \" /mnt/f/python/TouhouBrawlChronicles/server/src/main/kotlin/moe/gensoukyo/tbc/server/service/GameService.kt)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

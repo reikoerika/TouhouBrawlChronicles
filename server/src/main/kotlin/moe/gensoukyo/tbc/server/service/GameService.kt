@@ -4,6 +4,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import moe.gensoukyo.tbc.shared.card.CardFactory
 import moe.gensoukyo.tbc.shared.model.*
+import moe.gensoukyo.tbc.server.card.*
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
@@ -13,6 +14,7 @@ class GameService {
     private val roomMutex = Mutex()
     private val generals = createGenerals()  // 武将库
     private val cardEffectService = CardEffectService()  // 卡牌效果服务
+    private val cardExecutionEngine = CardExecutionEngine(cardEffectService)  // 卡牌执行引擎
     
     suspend fun createRoom(roomName: String, playerName: String): GameRoom = roomMutex.withLock {
         val roomId = UUID.randomUUID().toString()
@@ -225,6 +227,162 @@ class GameService {
     }
     
     fun getAllRooms(): List<GameRoom> = rooms.values.toList()
+    
+    // ======================== 新的卡牌执行系统 ========================
+    
+    /**
+     * 新的出牌方法 - 使用卡牌执行引擎
+     */
+    fun playCardNew(roomId: String, playerId: String, cardId: String, targetIds: List<String> = emptyList()): CardExecutionContext? {
+        val room = rooms[roomId] ?: return null
+        val player = room.players.find { it.id == playerId } ?: return null
+        val cardIndex = player.cards.indexOfFirst { it.id == cardId }
+        if (cardIndex == -1) return null
+        
+        val card = player.cards[cardIndex]
+        val targets = targetIds.mapNotNull { targetId -> 
+            room.players.find { it.id == targetId } 
+        }
+        
+        // 验证出牌合法性
+        if (!isValidCardPlay(card, player, targets, room)) {
+            return null
+        }
+        
+        // 从手牌中移除卡牌
+        player.cards.removeAt(cardIndex)
+        
+        // 开始执行
+        val context = cardExecutionEngine.startExecution(card, player, targets, room)
+        
+        // 保存执行上下文到房间
+        room.activeCardExecution = context
+        
+        return context
+    }
+    
+    /**
+     * 处理卡牌响应
+     */
+    fun respondToCardNew(roomId: String, playerId: String, responseCardId: String?, accept: Boolean): CardExecutionContext? {
+        val room = rooms[roomId] ?: return null
+        val context = room.activeCardExecution ?: return null
+        
+        val respondingPlayer = room.players.find { it.id == playerId } ?: return null
+        var responseCard: Card? = null
+        
+        // 处理响应卡牌
+        if (responseCardId != null && accept) {
+            val cardIndex = respondingPlayer.cards.indexOfFirst { it.id == responseCardId }
+            if (cardIndex != -1) {
+                responseCard = respondingPlayer.cards.removeAt(cardIndex)
+                room.discardPile.add(responseCard)
+            }
+        }
+        
+        // 根据当前阶段处理响应
+        val updatedContext = when (context.phase) {
+            CardExecutionPhase.NULLIFICATION -> {
+                cardExecutionEngine.handleNullificationResponse(context.id, playerId, responseCard)
+            }
+            CardExecutionPhase.SPECIAL_EXECUTION -> {
+                responseCardId?.let { 
+                    cardExecutionEngine.handleSpecialResponse(context.id, playerId, it, room)
+                }
+            }
+            else -> null
+        }
+        
+        // 如果执行完成，清理状态
+        if (updatedContext?.isCompleted == true) {
+            room.activeCardExecution = null
+            cardExecutionEngine.cleanupExecution(context.id)
+            
+            // 将原始卡牌加入弃牌堆
+            if (context.card.type != CardType.EQUIPMENT) {
+                room.discardPile.add(context.card)
+            }
+        }
+        
+        return updatedContext
+    }
+    
+    /**
+     * 继续执行卡牌效果（用于无懈可击响应完成后）
+     */
+    fun continueCardExecution(roomId: String): CardExecutionContext? {
+        val room = rooms[roomId] ?: return null
+        val context = room.activeCardExecution ?: return null
+        
+        val updatedContext = when (context.phase) {
+            CardExecutionPhase.RESOLUTION -> {
+                cardExecutionEngine.executeCardEffect(context.id, room)
+            }
+            else -> context
+        }
+        
+        // 如果执行完成，清理状态
+        if (updatedContext?.isCompleted == true) {
+            room.activeCardExecution = null
+            cardExecutionEngine.cleanupExecution(context.id)
+            
+            // 将原始卡牌加入弃牌堆
+            if (context.card.type != CardType.EQUIPMENT) {
+                room.discardPile.add(context.card)
+            }
+        }
+        
+        return updatedContext
+    }
+    
+    /**
+     * 获取当前需要响应的玩家
+     */
+    fun getCurrentResponseTarget(roomId: String): String? {
+        val room = rooms[roomId] ?: return null
+        val context = room.activeCardExecution ?: return null
+        
+        return cardExecutionEngine.getResponseTarget(context.id)
+    }
+    
+    /**
+     * 获取可用的响应选项（如五谷丰登的卡牌列表）
+     */
+    fun getAvailableResponseOptions(roomId: String): List<String> {
+        val room = rooms[roomId] ?: return emptyList()
+        val context = room.activeCardExecution ?: return emptyList()
+        
+        return when (context.card.name) {
+            "五谷丰登" -> {
+                val availableCards = context.specialData["availableCards"] as? List<Card>
+                availableCards?.map { it.id } ?: emptyList()
+            }
+            else -> emptyList()
+        }
+    }
+    
+    // ======================== 辅助方法 ========================
+    
+    private fun isValidCardPlay(card: Card, player: Player, targets: List<Player>, room: GameRoom): Boolean {
+        // 基本验证逻辑
+        if (room.gameState != GameState.PLAYING) return false
+        if (room.gamePhase != GamePhase.PLAY) return false
+        
+        // 验证目标数量和类型
+        return when (card.targetType) {
+            TargetType.NONE -> targets.isEmpty()
+            TargetType.SINGLE -> targets.size == 1
+            TargetType.MULTIPLE -> targets.isNotEmpty()
+            TargetType.ALL_OTHERS -> {
+                val expectedTargets = room.players.filter { it.id != player.id && it.health > 0 }
+                targets.size == expectedTargets.size
+            }
+            TargetType.ALL_PLAYERS -> {
+                val expectedTargets = room.players.filter { it.health > 0 }
+                targets.size == expectedTargets.size
+            }
+        }
+    }
     
     fun startGame(roomId: String): Pair<GameRoom, List<Pair<String, List<Card>>>>? {
         val room = rooms[roomId] ?: return null

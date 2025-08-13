@@ -47,6 +47,13 @@ sealed class ClientMessage {
     
     @Serializable
     data class SelectAbundantHarvestCard(val playerId: String, val selectedCardId: String) : ClientMessage()
+    
+    // 新的卡牌执行系统消息
+    @Serializable
+    data class PlayCardNew(val playerId: String, val cardId: String, val targetIds: List<String> = emptyList()) : ClientMessage()
+    
+    @Serializable  
+    data class RespondToCardNew(val playerId: String, val responseCardId: String? = null, val accept: Boolean = false) : ClientMessage()
 }
 
 @Serializable
@@ -147,4 +154,62 @@ sealed class ServerMessage {
         val selections: Map<String, Card>,
         val room: GameRoom
     ) : ServerMessage()
+    
+    // 新的卡牌执行系统消息
+    @Serializable
+    data class CardExecutionStarted(
+        val executionId: String,
+        val casterName: String,
+        val cardName: String,
+        val targetNames: List<String>,
+        val room: GameRoom
+    ) : ServerMessage()
+    
+    @Serializable
+    data class ResponseRequired(
+        val executionId: String,
+        val targetPlayerId: String,
+        val responseType: String,
+        val originalCard: Card,
+        val casterName: String,
+        val timeoutMs: Long = 15000,
+        val availableOptions: List<ResponseOption> = emptyList()
+    ) : ServerMessage()
+    
+    @Serializable
+    data class ResponseReceived(
+        val executionId: String,
+        val playerId: String,
+        val playerName: String,
+        val responseCard: Card?,
+        val accepted: Boolean,
+        val room: GameRoom
+    ) : ServerMessage()
+    
+    @Serializable
+    data class CardExecutionCompleted(
+        val executionId: String,
+        val success: Boolean,
+        val blocked: Boolean,
+        val message: String,
+        val room: GameRoom
+    ) : ServerMessage()
+    
+    @Serializable
+    data class SpecialExecutionStarted(
+        val executionId: String,
+        val cardName: String,
+        val currentPlayerId: String,
+        val currentPlayerName: String,
+        val availableOptions: List<ResponseOption>,
+        val room: GameRoom
+    ) : ServerMessage()
+}
+
+@Serializable
+data class ResponseOption(
+    val id: String,
+    val name: String,
+    val description: String
+)
 }
