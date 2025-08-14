@@ -232,6 +232,15 @@ class GameService {
                 )
             }
             
+            // 验证当前回合玩家
+            if (room.currentPlayer?.id != playerId) {
+                throw CardExecutionException.InvalidGameStateException(
+                    currentState = "NOT_PLAYER_TURN",
+                    expectedState = "PLAYER_TURN", 
+                    operation = "playCard - 不是该玩家的回合"
+                )
+            }
+            
             // 验证并获取卡牌
             val cardIndex = player.cards.indexOfFirst { it.id == cardId }
             if (cardIndex == -1) {

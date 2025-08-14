@@ -122,6 +122,7 @@ class GameServiceTest {
         
         val updatedRoom = gameStartResult.first
         val player2 = updatedRoom.players[1] // 非当前回合玩家
+        val player1 = updatedRoom.players[0]
         
         // 给玩家2添加卡牌
         player2.cards.add(Card(
@@ -133,7 +134,7 @@ class GameServiceTest {
         ))
         
         // 玩家2尝试在非自己回合时出牌
-        val result = gameService.playCard(room.id, player2.id, "test_card_2", emptyList())
+        val result = gameService.playCard(room.id, player2.id, "test_card_2", listOf(player1.id))
         
         assertTrue(result.isFailure)
         val exception = result.exceptionOrNull()
