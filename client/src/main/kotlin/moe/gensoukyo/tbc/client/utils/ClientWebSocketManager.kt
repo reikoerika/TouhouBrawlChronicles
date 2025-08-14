@@ -262,13 +262,13 @@ class ClientWebSocketManager(
     /**
      * 发送排队的消息
      */
-    private suspend fun flushMessageQueue() {
+    private fun flushMessageQueue() {
         synchronized(messageQueue) {
             val messagesToSend = messageQueue.toList()
             messageQueue.clear()
             
             messagesToSend.forEach { message ->
-                launch {
+                CoroutineScope(Dispatchers.IO).launch {
                     sendMessage(message)
                 }
             }
