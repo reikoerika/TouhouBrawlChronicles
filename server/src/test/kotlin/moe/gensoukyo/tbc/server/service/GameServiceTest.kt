@@ -5,8 +5,9 @@ import moe.gensoukyo.tbc.shared.exceptions.CardExecutionException
 import moe.gensoukyo.tbc.shared.model.Card
 import moe.gensoukyo.tbc.shared.model.CardType
 import moe.gensoukyo.tbc.shared.model.GameState
-import org.junit.Test
+import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -93,10 +94,18 @@ class GameServiceTest {
 
     @Test
     fun `test playCard with invalid card should return failure`() = runBlocking {
+        // 创建房间并添加第二个玩家
         val room = gameService.createRoom("测试房间", "玩家1")
-        val player = room.players[0]
+        gameService.joinRoom(room.id, "玩家2", false)
         
-        val result = gameService.playCard(room.id, player.id, "invalid_card", emptyList())
+        // 开始游戏以设置正确的游戏状态和阶段
+        val gameStartResult = gameService.startGame(room.id)
+        assertNotNull(gameStartResult)
+        
+        val updatedRoom = gameStartResult.first
+        val player = updatedRoom.players[0]
+        
+        val result = gameService.playCard(updatedRoom.id, player.id, "invalid_card", emptyList())
         
         assertTrue(result.isFailure)
         val exception = result.exceptionOrNull()
