@@ -236,6 +236,18 @@ class CardExecutionHandler(
             return
         }
         
+        // 添加使用过的卡牌到出牌区（无论成功或被阻挡）
+        val playedCard = moe.gensoukyo.tbc.shared.model.PlayedCard(
+            card = context.card,
+            playerId = context.caster.id,
+            playerName = context.caster.name,
+            turnNumber = room.turnCount,
+            timestamp = System.currentTimeMillis(),
+            targetIds = context.finalTargets.map { it.id }
+        )
+        room.currentTurnPlayedCards.add(playedCard)
+        logDebug("Added card ${context.card.name} to play area for player ${context.caster.name} (blocked: ${context.isBlocked})")
+        
         // 广播卡牌执行完成消息
         broadcastToRoom(roomId) {
             ServerMessage.CardExecutionCompleted(
@@ -247,7 +259,7 @@ class CardExecutionHandler(
             )
         }
         
-        // 广播游戏状态更新以同步手牌变化
+        // 广播游戏状态更新以同步手牌变化和出牌区
         broadcastToRoom(roomId) {
             ServerMessage.GameStateUpdate(room)
         }
