@@ -54,7 +54,10 @@ class CardExecutionHandler(
             logInfo("Starting card execution for player ${message.playerId} in room $roomId")
 
             val context = gameService.playCard(roomId, message.playerId, message.cardId, message.targetIds)
-                ?: return Result.failure(IllegalStateException("Failed to start card execution"))
+                .onFailure { error ->
+                    logError("Failed to start card execution: ${error.message}", error)
+                    return Result.failure(error)
+                }.getOrThrow()
 
             // 更新WebSocket连接映射
             updateConnectionMappings(connections, playerSessions, spectatorSessions)
@@ -312,7 +315,7 @@ class CardExecutionHandler(
         }
         
         if (sessionIds.isEmpty()) {
-            logWarn("No active sessions found for room $roomId - playerSessions: ${playerSessions.keys}, spectatorSessions: ${spectatorSessions.keys}, roomPlayerIds: ${allPlayerIds}")
+            logWarn("No active sessions found for room $roomId - playerSessions: ${playerSessions.keys}, spectatorSessions: ${spectatorSessions.keys}, roomPlayerIds: $allPlayerIds")
             return
         }
         
