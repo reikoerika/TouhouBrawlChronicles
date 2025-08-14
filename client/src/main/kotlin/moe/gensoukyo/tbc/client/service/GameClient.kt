@@ -336,7 +336,7 @@ class GameClient {
             
             when (readlnOrNull()) {
                 "1" -> drawCard()
-                "2" -> useCard()
+                "2" -> playCard()
                 "3" -> changeHealth(10)
                 "4" -> changeHealth(-10)
                 "5" -> showCards()
@@ -364,54 +364,6 @@ class GameClient {
     private suspend fun drawCard() {
         val playerId = currentPlayer?.id ?: return
         val message = ClientMessage.DrawCard(playerId)
-        session?.send(Json.encodeToString<ClientMessage>(message))
-    }
-    
-    private suspend fun useCard() {
-        val player = currentPlayer ?: return
-        
-        if (player.cards.isEmpty()) {
-            println("你没有卡牌可用")
-            return
-        }
-        
-        println("\\n你的手牌:")
-        player.cards.forEachIndexed { index, card ->
-            println("${index + 1}. ${card.name} - ${card.effect}")
-        }
-        
-        print("选择要使用的卡牌 (输入序号): ")
-        val choice = readlnOrNull()?.toIntOrNull()
-        
-        if (choice == null || choice < 1 || choice > player.cards.size) {
-            println("无效选择")
-            return
-        }
-        
-        val card = player.cards[choice - 1]
-        
-        // 如果是攻击卡，需要选择目标
-        var targetId: String? = null
-        if (card.type == moe.gensoukyo.tbc.shared.model.CardType.BASIC) {
-            val room = currentRoom ?: return
-            val otherPlayers = room.players.filter { it.id != player.id }
-            
-            if (otherPlayers.isNotEmpty()) {
-                println("选择攻击目标:")
-                otherPlayers.forEachIndexed { index, target ->
-                    println("${index + 1}. ${target.name}")
-                }
-                
-                print("选择目标 (输入序号): ")
-                val targetChoice = readlnOrNull()?.toIntOrNull()
-                
-                if (targetChoice != null && targetChoice in 1..otherPlayers.size) {
-                    targetId = otherPlayers[targetChoice - 1].id
-                }
-            }
-        }
-        
-        val message = ClientMessage.PlayCard(player.id, card.id, listOfNotNull(targetId))
         session?.send(Json.encodeToString<ClientMessage>(message))
     }
     

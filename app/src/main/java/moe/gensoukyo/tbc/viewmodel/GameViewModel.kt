@@ -3,12 +3,17 @@ package moe.gensoukyo.tbc.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import io.ktor.client.*
-import io.ktor.client.engine.okhttp.*
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.plugins.websocket.*
-import io.ktor.serialization.kotlinx.json.*
-import io.ktor.websocket.*
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.plugins.websocket.webSocketSession
+import io.ktor.serialization.kotlinx.json.json
+import io.ktor.websocket.Frame
+import io.ktor.websocket.WebSocketSession
+import io.ktor.websocket.close
+import io.ktor.websocket.readText
+import io.ktor.websocket.send
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +28,8 @@ import moe.gensoukyo.tbc.shared.model.Identity
 import moe.gensoukyo.tbc.shared.model.Player
 import moe.gensoukyo.tbc.shared.model.ResponseType
 import moe.gensoukyo.tbc.shared.model.Spectator
+import moe.gensoukyo.tbc.shared.utils.logInfo
+import moe.gensoukyo.tbc.shared.utils.logWarn
 
 class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val preferencesManager = PreferencesManager.getInstance(application)
@@ -107,14 +114,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.saveLastRoomId(roomId)
         sendMessage(ClientMessage.JoinRoom(roomId, playerName, spectateOnly = false))
     }
-    
-    fun spectateRoom(roomId: String, playerName: String) {
-        // 以观战者身份加入房间
-        preferencesManager.savePlayerName(playerName)
-        preferencesManager.saveLastRoomId(roomId)
-        sendMessage(ClientMessage.JoinRoom(roomId, playerName, spectateOnly = true))
-    }
-    
+
     fun drawCard() {
         _uiState.value.currentPlayer?.let { player ->
             sendMessage(ClientMessage.DrawCard(player.id))
@@ -158,54 +158,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     
     fun playCard(cardId: String, targetIds: List<String> = emptyList()) {
         _uiState.value.currentPlayer?.let { player ->
-            // 立即从本地手牌中移除卡牌
-            val cardIndex = player.cards.indexOfFirst { it.id == cardId }
-            if (cardIndex != -1) {
-                val updatedCards = player.cards.toMutableList().apply {
-                    removeAt(cardIndex)
-                }
-                val updatedPlayer = player.copy(cards = updatedCards)
-                
-                // 更新本地状态
-                _uiState.value = _uiState.value.copy(
-                    currentPlayer = updatedPlayer
-                )
-            }
-            
-            // 发送出牌消息到服务器
+            logInfo("Playing card: $cardId with targets: $targetIds")
             sendMessage(ClientMessage.PlayCard(player.id, cardId, targetIds))
+        } ?: run {
+            logWarn("Cannot play card: no current player")
         }
     }
     
     fun respondToCard(responseCardId: String?, accept: Boolean = false) {
         _uiState.value.currentPlayer?.let { player ->
-            // 如果接受响应且有响应卡牌，立即从本地手牌中移除
-            if (accept && responseCardId != null) {
-                val cardIndex = player.cards.indexOfFirst { it.id == responseCardId }
-                if (cardIndex != -1) {
-                    val updatedCards = player.cards.toMutableList().apply {
-                        removeAt(cardIndex)
-                    }
-                    val updatedPlayer = player.copy(cards = updatedCards)
-                    
-                    // 更新本地状态
-                    _uiState.value = _uiState.value.copy(
-                        currentPlayer = updatedPlayer
-                    )
-                }
-            }
-            
-            // 发送响应消息到服务器
+            logInfo("Responding to card: responseCard=$responseCardId, accept=$accept")
             sendMessage(ClientMessage.RespondToCard(player.id, responseCardId, accept))
+        } ?: run {
+            logWarn("Cannot respond to card: no current player")
         }
     }
-    
-    fun selectAbundantHarvestCard(selectedCardId: String) {
-        _uiState.value.currentPlayer?.let { player ->
-            sendMessage(ClientMessage.SelectAbundantHarvestCard(player.id, selectedCardId))
-        }
-    }
-    
+
     private fun sendMessage(message: ClientMessage) {
         viewModelScope.launch {
             try {
