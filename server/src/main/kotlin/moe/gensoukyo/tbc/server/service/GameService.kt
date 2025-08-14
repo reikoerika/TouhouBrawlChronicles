@@ -43,7 +43,7 @@ class GameService {
         room
     }
     
-    suspend fun joinRoom(roomId: String, playerName: String, spectateOnly: Boolean = false): Triple<GameRoom, Player?, moe.gensoukyo.tbc.shared.model.Spectator?>? = roomMutex.withLock {
+    suspend fun joinRoom(roomId: String, playerName: String, spectateOnly: Boolean = false): Triple<GameRoom, Player?, Spectator?>? = roomMutex.withLock {
         val room = rooms[roomId] ?: return null
         
         // 检查是否存在同名玩家（重连情况）
@@ -63,7 +63,7 @@ class GameService {
         // 如果游戏正在进行中或者指定只观战，则以观战者身份加入
         if (room.gameState == GameState.PLAYING || spectateOnly) {
             val spectatorId = UUID.randomUUID().toString()
-            val spectator = moe.gensoukyo.tbc.shared.model.Spectator(
+            val spectator = Spectator(
                 id = spectatorId,
                 name = playerName
             )
@@ -75,7 +75,7 @@ class GameService {
         if (room.players.size >= room.maxPlayers) {
             // 房间已满，以观战者身份加入
             val spectatorId = UUID.randomUUID().toString()
-            val spectator = moe.gensoukyo.tbc.shared.model.Spectator(
+            val spectator = Spectator(
                 id = spectatorId,
                 name = playerName
             )

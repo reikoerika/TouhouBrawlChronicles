@@ -75,3 +75,22 @@ inline fun <reified T> T.logWarn(message: String, throwable: Throwable? = null) 
 inline fun <reified T> T.logError(message: String, throwable: Throwable? = null) {
     Logger.error(T::class.simpleName ?: "Unknown", message, throwable)
 }
+
+/**
+ * 顶级日志函数，用于在无法获取类上下文的地方使用
+ */
+fun logDebug(message: String, throwable: Throwable? = null) {
+    Logger.debug("Global", message, throwable)
+}
+
+fun logInfo(message: String, throwable: Throwable? = null) {
+    Logger.info("Global", message, throwable)
+}
+
+fun logWarn(message: String, throwable: Throwable? = null) {
+    Logger.warn("Global", message, throwable)
+}
+
+fun logError(message: String, throwable: Throwable? = null) {
+    Logger.error("Global", message, throwable)
+}
