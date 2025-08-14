@@ -149,27 +149,6 @@ class GameClient {
                 currentRoom = message.room
             }
             
-            is ServerMessage.CardResolved -> {
-                println("\\n卡牌结算完成：${message.result.message}")
-                currentRoom = message.room
-            }
-            
-            is ServerMessage.CardResponseReceived -> {
-                if (message.responseCard != null) {
-                    println("\\n${message.playerId}出了${message.responseCard!!.name}进行响应")
-                } else {
-                    println("\\n${message.playerId}选择${if (message.accepted) "接受" else "拒绝"}响应")
-                }
-                currentRoom = message.room
-            }
-            
-            is ServerMessage.CardResponseRequired -> {
-                if (currentPlayer?.id == message.targetPlayerId) {
-                    println("\\n需要响应${message.originalPlayer}的${message.originalCard.name}")
-                    handleCardResponse(message.originalCard)
-                }
-            }
-            
             is ServerMessage.CardsDrawn -> {
                 if (currentPlayer?.id == message.playerId) {
                     println("\\n你摸了${message.cards.size}张牌")
@@ -401,28 +380,6 @@ class GameClient {
         val selectedCard = availableCards[choice - 1]
         val playerId = currentPlayer?.id ?: return
         val message = ClientMessage.SelectAbundantHarvestCard(playerId, selectedCard.id)
-        session?.send(Json.encodeToString<ClientMessage>(message))
-    }
-    
-    private suspend fun handleCardResponse(originalCard: moe.gensoukyo.tbc.shared.model.Card) {
-        val player = currentPlayer ?: return
-        
-        println("需要响应${originalCard.name}，你的手牌：")
-        player.cards.forEachIndexed { index, card ->
-            println("${index + 1}. ${card.name}")
-        }
-        println("0. 不响应")
-        
-        print("选择响应卡牌 (输入序号): ")
-        val choice = readlnOrNull()?.toIntOrNull()
-        
-        if (choice == null || choice < 0 || choice > player.cards.size) {
-            println("无效选择")
-            return
-        }
-        
-        val responseCardId = if (choice > 0) player.cards[choice - 1].id else null
-        val message = ClientMessage.RespondToCard(player.id, responseCardId, choice > 0)
         session?.send(Json.encodeToString<ClientMessage>(message))
     }
     

@@ -2,12 +2,9 @@ package moe.gensoukyo.tbc.shared.messages
 
 import kotlinx.serialization.Serializable
 import moe.gensoukyo.tbc.shared.model.Card
-import moe.gensoukyo.tbc.shared.model.CardResolutionResult
-import moe.gensoukyo.tbc.shared.model.CardResponse
 import moe.gensoukyo.tbc.shared.model.GameRoom
 import moe.gensoukyo.tbc.shared.model.Player
 import moe.gensoukyo.tbc.shared.model.PlayedCard
-import moe.gensoukyo.tbc.shared.model.ResponseType
 import moe.gensoukyo.tbc.shared.model.Spectator
 
 @Serializable
@@ -91,31 +88,6 @@ sealed class ServerMessage {
     
     @Serializable
     data class CardPlayed(val playedCard: PlayedCard, val room: GameRoom) : ServerMessage()
-    
-    @Serializable
-    data class CardResponseRequired(
-        val targetPlayerId: String,
-        val originalCard: Card,
-        val originalPlayer: String,
-        val responseType: ResponseType,
-        val timeoutMs: Long = 15000
-    ) : ServerMessage()
-    
-    @Serializable
-    data class CardResponseReceived(
-        val playerId: String, 
-        val responseCard: Card?, 
-        val accepted: Boolean,
-        val room: GameRoom
-    ) : ServerMessage()
-    
-    @Serializable
-    data class CardResolved(
-        val originalCard: Card,
-        val responses: List<CardResponse>,
-        val result: CardResolutionResult,
-        val room: GameRoom
-    ) : ServerMessage()
     
     @Serializable
     data class AbundantHarvestStarted(
